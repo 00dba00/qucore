@@ -9,6 +9,8 @@ Electron + React + TypeScript. The database layer (`src/core`) has no Electron d
 
 The interface is in **English** and **Croatian** (Settings → Language). [Hrvatska verzija ovog dokumenta](README.hr.md).
 
+**Website and downloads: [00dba00.github.io/qucore](https://00dba00.github.io/qucore/)**
+
 ![QuCore](docs/guide/img/en/05-editor-results.jpg)
 
 ## User guide
@@ -22,7 +24,7 @@ Installers for Windows, macOS (Intel and Apple Silicon) and Linux are attached t
 
 | Platform | File | Install |
 |---|---|---|
-| Windows 10/11 | `QuCore Setup x.y.z.exe` | run it and pick a folder |
+| Windows 10/11 | `QuCore-Setup-x.y.z.exe` | run it and pick a folder |
 | macOS 12+ | `QuCore-x.y.z-mac-arm64.dmg` (Apple Silicon) or `-mac-x64.dmg` (Intel) | open the .dmg and drag QuCore to Applications |
 | Linux x64 | `QuCore-x.y.z-linux-x86_64.AppImage` or `.tar.gz` | `chmod +x QuCore-*.AppImage`, then run it |
 
@@ -133,6 +135,14 @@ GUIDE_LANG=en GUIDE_PROFILE=<empty folder> node scripts/guide-shots.mjs   # Engl
 ```
 
 The screenshots run on a temporary profile, never on your real one, and contain only fictional data.
+
+### Website
+
+```bash
+npm run site:preview   # build site/dist and serve it at http://localhost:4173/qucore/
+```
+
+`site/src` holds the home page, layout, styles and script; `scripts/build-site.ts` adds the guide (one page per chapter) and the changelog. Pushing to `main` publishes it to GitHub Pages (`.github/workflows/pages.yml`).
 
 ## Known limitations
 

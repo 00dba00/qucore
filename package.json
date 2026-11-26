@@ -22,6 +22,8 @@
     "db:down": "docker compose -f docker/compose.yml down",
     "db:seed": "node --experimental-strip-types --no-warnings scripts/seed-test-db.ts",
     "test:db": "npm run db:seed && npm run test:core",
+    "site:build": "node --experimental-strip-types --no-warnings scripts/build-site.ts",
+    "site:preview": "node --experimental-strip-types --no-warnings scripts/build-site.ts --serve",
     "db:demo": "node --experimental-strip-types --no-warnings scripts/seed-demo-db.ts"
   },
   "build": {
@@ -49,7 +51,8 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "mac": {
       "target": [
@@ -100,12 +103,15 @@
     "pg": "^8.23.1"
   },
   "devDependencies": {
+    "@fontsource/instrument-sans": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
     "@monaco-editor/react": "^4.7.0",
     "@types/mssql": "^12.3.0",
     "@types/node": "^26.6.6",
     "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@vectilume/icons": "^0.3.0",
     "@vectilume/react": "^0.3.0",
     "@vitejs/plugin-react": "^6.3.0",
     "@xyflow/react": "12.12.1",

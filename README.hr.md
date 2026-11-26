@@ -15,7 +15,7 @@ Potrebno: [Node.js 22+](https://nodejs.org).
 ```bash
 npm install
 npm run dev          # razvoj s hot-reloadom
-npm run build:win    # installer u dist/ (QuCore Setup x.y.z.exe)
+npm run build:win    # installer u dist/ (QuCore-Setup-x.y.z.exe)
 npm run build:mac    # macOS .dmg i .zip (na Macu)
 npm run build:linux  # Linux AppImage i .tar.gz (na Linuxu)
 ```

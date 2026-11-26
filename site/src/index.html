@@ -1,0 +1,126 @@
+      <section class="hero">
+        <div class="wrap">
+          <pre class="hero-query" aria-label="SELECT * FROM your_databases WHERE engine IN ('SQL Server', 'PostgreSQL', 'MariaDB');"><code data-type><span class="k">SELECT</span> * <span class="k">FROM</span> your_databases
+ <span class="k">WHERE</span> engine <span class="k">IN</span> (<span class="s">'SQL Server'</span>,
+                  <span class="s">'PostgreSQL'</span>,
+                  <span class="s">'MariaDB'</span>);</code></pre>
+          <div class="hero-body">
+            <p class="lede">
+              QuCore is a free desktop SQL editor. Run the statement you are on, keep the queries you reuse in projects,
+              and catch a <code>DELETE</code> without <code>WHERE</code> before it reaches production.
+            </p>
+            <div class="hero-actions">
+              <a class="btn" href="#download" data-primary-download>{{icon:download}}<span>Download QuCore</span></a>
+              <a class="text-link" href="#download">Windows, macOS and Linux</a>
+            </div>
+            <p class="hero-meta" data-release-line>Open source, MIT license.</p>
+          </div>
+        </div>
+        <figure class="hero-shot wrap-wide">
+          <img src="{{base}}img/05-editor-results.jpg" width="1400" height="860"
+            alt="QuCore with the explorer on the left, a query in the editor and its result grid below" />
+        </figure>
+      </section>
+
+      <section class="features" aria-labelledby="features-title">
+        <div class="wrap">
+          <h2 id="features-title">What it does</h2>
+          <p class="section-lede">The things you do with a database every day, without a heavy IDE around them.</p>
+          <div class="result" role="region" aria-label="Features" tabindex="0">
+            <div class="result-tabs" aria-hidden="true">
+              <span class="result-tab on">Result 1 <span class="muted">(12)</span></span>
+              <span class="result-tab">Messages</span>
+            </div>
+            <table class="grid">
+              <thead>
+                <tr><th class="rn" scope="col"><span class="sr">Row</span></th><th scope="col">feature</th><th scope="col">what you get</th><th scope="col">shortcut</th></tr>
+              </thead>
+              <tbody>
+                <tr><td class="rn">1</td><th scope="row">Run the statement at the cursor</th><td>Run just the statement you are on, or the whole script, or only what you selected.</td><td><kbd>Ctrl+Enter</kbd></td></tr>
+                <tr><td class="rn">2</td><th scope="row">Results while it runs</th><td>Rows show up as they arrive. Big results pause at a limit you set, so the grid stays fast.</td><td><kbd>Esc</kbd> cancels</td></tr>
+                <tr><td class="rn">3</td><th scope="row">Projects and saved queries</th><td>Keep the queries of one job together, in folders, with pins and full-text search.</td><td><kbd>Ctrl+P</kbd></td></tr>
+                <tr><td class="rn">4</td><th scope="row">Versions</th><td>Every change to a saved query is a version you can compare and restore, with the run times of the last 30 runs.</td><td class="null">NULL</td></tr>
+                <tr><td class="rn">5</td><th scope="row">One query, three environments</th><td>Point an alias at your dev, test and prod databases and switch per tab.</td><td class="null">NULL</td></tr>
+                <tr><td class="rn">6</td><th scope="row">Variables</th><td>Write <code>:customer_id</code> and fill it in a form. Values are quoted for your database and remembered.</td><td><kbd>F5</kbd></td></tr>
+                <tr class="sel"><td class="rn">7</td><th scope="row">Execution plans</th><td>See why a query is slow. The most expensive step is marked, and ANALYZE adds actual rows and time.</td><td><kbd>Ctrl+Shift+E</kbd></td></tr>
+                <tr><td class="rn">8</td><th scope="row">Edit data in the grid</th><td>Change cells, then read the exact statements before they run in one transaction.</td><td><kbd>F2</kbd></td></tr>
+                <tr><td class="rn">9</td><th scope="row">Copy and export</th><td>Paste into Excel with column names, or copy as INSERT, JSON, Markdown or CSV. Export to .xlsx.</td><td><kbd>Ctrl+A</kbd></td></tr>
+                <tr><td class="rn">10</td><th scope="row">ER diagram</th><td>Tables and foreign keys laid out for you, with search and PNG or SVG export.</td><td class="null">NULL</td></tr>
+                <tr><td class="rn">11</td><th scope="row">History that groups</th><td>Every run is kept. The same query with other values counts as one, so you see how often you need it.</td><td class="null">NULL</td></tr>
+                <tr><td class="rn">12</td><th scope="row">English and Croatian</th><td>Pick the interface language in Settings. The built-in guide follows it.</td><td><kbd>Ctrl+,</kbd></td></tr>
+              </tbody>
+            </table>
+            <p class="result-status"><span class="ok">Success</span><span>12 rows</span><span>SQL Server, PostgreSQL, MariaDB and MySQL</span></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="safety" aria-labelledby="safety-title">
+        <div class="wrap safety-inner">
+          <div class="safety-text">
+            <p class="prod-badge" aria-hidden="true">PROD</p>
+            <h2 id="safety-title">Production gets a second look</h2>
+            <ul class="plain">
+              <li>On a connection marked <strong>prod</strong>, every write asks for confirmation first. Plain <code>SELECT</code> runs straight away.</li>
+              <li>An <code>UPDATE</code> or <code>DELETE</code> without <code>WHERE</code>, and <code>TRUNCATE</code>, need an extra tick on any connection.</li>
+              <li>A saved query started on a different database than it was written for asks before it runs.</li>
+              <li>Turn auto-commit off to check your changes, then Commit or Rollback. Closing a tab never drops an open transaction silently.</li>
+            </ul>
+            <p>Each check can be switched off in Settings, and Settings tells you what you would risk.</p>
+          </div>
+          <figure class="safety-shot">
+            <img src="{{base}}img/22-guard-unbounded.jpg" loading="lazy" alt="Confirmation dialog: DELETE without WHERE deletes every row, with an I understand checkbox" />
+          </figure>
+        </div>
+      </section>
+
+      <section class="shots" aria-labelledby="shots-title">
+        <div class="wrap">
+          <h2 id="shots-title">A closer look</h2>
+        </div>
+        <div class="shots-row wrap-wide">
+          <figure>
+            <img src="{{base}}img/13-saved-panel.jpg" loading="lazy" alt="Saved queries panel with folders, a pinned query and a warning for a missing table" />
+            <figcaption>Saved queries in folders, with run counts and a warning when a table disappears.</figcaption>
+          </figure>
+          <figure>
+            <img src="{{base}}img/15-versions.jpg" loading="lazy" alt="Versions dialog comparing two versions of a query, with duration and row charts" />
+            <figcaption>Compare versions side by side and restore an older one.</figcaption>
+          </figure>
+          <figure>
+            <img src="{{base}}img/31-plan.jpg" loading="lazy" alt="Execution plan tree with the most expensive step marked" />
+            <figcaption>Execution plans with actual rows and time.</figcaption>
+          </figure>
+          <figure>
+            <img src="{{base}}img/08-er-diagram.jpg" loading="lazy" alt="ER diagram of a shop database with the orders table highlighted" />
+            <figcaption>ER diagrams straight from your foreign keys.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="download" id="download" aria-labelledby="download-title">
+        <div class="wrap">
+          <h2 id="download-title">Download</h2>
+          <p class="section-lede" data-release-detail>The latest release is on GitHub.</p>
+          <table class="grid platforms">
+            <thead><tr><th scope="col">platform</th><th scope="col">file</th><th scope="col">size</th><th scope="col"><span class="sr">Download</span></th></tr></thead>
+            <tbody data-platforms>
+              <tr data-os="windows"><th scope="row">Windows 10 and 11</th><td class="file">Installer (.exe)</td><td class="size"></td><td><a class="btn btn-small" href="https://github.com/00dba00/qucore/releases/latest">{{icon:download}}<span>Download</span></a></td></tr>
+              <tr data-os="mac-arm"><th scope="row">macOS, Apple Silicon</th><td class="file">Disk image (.dmg)</td><td class="size"></td><td><a class="btn btn-small" href="https://github.com/00dba00/qucore/releases/latest">{{icon:download}}<span>Download</span></a></td></tr>
+              <tr data-os="mac-intel"><th scope="row">macOS, Intel</th><td class="file">Disk image (.dmg)</td><td class="size"></td><td><a class="btn btn-small" href="https://github.com/00dba00/qucore/releases/latest">{{icon:download}}<span>Download</span></a></td></tr>
+              <tr data-os="linux"><th scope="row">Linux x64</th><td class="file">AppImage</td><td class="size"></td><td><a class="btn btn-small" href="https://github.com/00dba00/qucore/releases/latest">{{icon:download}}<span>Download</span></a></td></tr>
+            </tbody>
+          </table>
+          <div class="note">
+            {{icon:alert-triangle}}
+            <div>
+              <p><strong>The installers are not code-signed yet,</strong> so the first start shows a warning.</p>
+              <p>Windows: <em>More info</em>, then <em>Run anyway</em>. macOS: right-click QuCore in Finder, then <em>Open</em>. Linux: make the AppImage executable with <code>chmod +x</code>.</p>
+            </div>
+          </div>
+          <p class="after-download">
+            New to QuCore? The <a href="{{base}}guide/">user guide</a> walks you through your first connection.
+            All files and older versions are on the <a href="https://github.com/00dba00/qucore/releases">releases page</a>.
+          </p>
+        </div>
+      </section>

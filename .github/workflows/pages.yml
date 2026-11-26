@@ -1,0 +1,51 @@
+name: Website
+
+# Gradi site/dist (npm run site:build) i objavljuje ga na GitHub Pages (00dba00.github.io/qucore).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'docs/guide/**'
+      - 'CHANGELOG.md'
+      - 'scripts/build-site.ts'
+      - 'scripts/vite-guide-plugin.ts'
+      - '.github/workflows/pages.yml'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run site:build
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

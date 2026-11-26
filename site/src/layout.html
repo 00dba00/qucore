@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{title}}</title>
+    <meta name="description" content="{{description}}" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="{{title}}" />
+    <meta property="og:description" content="{{description}}" />
+    <meta property="og:image" content="{{siteUrl}}img/og.jpg" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/svg+xml" href="{{base}}favicon.svg" />
+    <link rel="stylesheet" href="{{base}}styles.css" />
+    <script type="module" src="{{base}}site.js"></script>
+  </head>
+  <body class="{{bodyClass}}" data-base="{{base}}">
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="top">
+      <div class="top-inner">
+        <a class="brand" href="{{base}}" aria-label="QuCore home">
+          <img src="{{base}}logo-icon.svg" alt="" width="28" height="28" />
+          <span>QuCore</span>
+        </a>
+        <nav class="top-nav" aria-label="Main">
+          <a href="{{base}}guide/"{{navGuide}}>Guide</a>
+          <a href="{{base}}changelog/"{{navChangelog}}>Changelog</a>
+          <a href="https://github.com/00dba00/qucore">Source on GitHub</a>
+          <a class="btn btn-small" href="{{base}}#download">Download</a>
+        </nav>
+      </div>
+    </header>
+    <main id="main">
+{{content}}
+    </main>
+    <footer class="foot">
+      <div class="foot-inner">
+        <p>QuCore is free and open source under the <a href="https://github.com/00dba00/qucore/blob/main/LICENSE">MIT license</a>.</p>
+        <p>
+          <a href="https://github.com/00dba00/qucore">Source code</a>
+          <a href="https://github.com/00dba00/qucore/issues">Report a bug</a>
+          <a href="https://github.com/00dba00/qucore/security/policy">Report a security issue</a>
+        </p>
+      </div>
+    </footer>
+  </body>
+</html>

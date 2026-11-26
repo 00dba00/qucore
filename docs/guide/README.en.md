@@ -52,7 +52,7 @@ The window has two parts: the **sidebar** on the left (project, Connections / Sa
 
 ## 2. First start
 
-1. Run the installer `QuCore Setup x.y.z.exe` and choose a folder (or keep the default). On macOS open the `.dmg` and drag QuCore to *Applications*; on Linux run the `.AppImage` (`chmod +x` the first time).
+1. Run the installer `QuCore-Setup-x.y.z.exe` and choose a folder (or keep the default). On macOS open the `.dmg` and drag QuCore to *Applications*; on Linux run the `.AppImage` (`chmod +x` the first time).
 2. Open **QuCore**. You see the start screen with the **New connection** and **New query** buttons.
 3. Click **New connection** and enter your database details (chapter 3).
 4. When the connection appears on the left, click it: QuCore connects and shows the databases.

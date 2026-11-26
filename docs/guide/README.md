@@ -52,7 +52,7 @@ Prozor ima dva dijela: **sidebar** lijevo (projekt, Konekcije / Spremljeno / Pov
 
 ## 2. Prvo pokretanje
 
-1. Pokreni instalaciju `QuCore Setup x.y.z.exe` i odaberi mapu (ili ostavi zadanu). Na macOS-u otvori `.dmg` i povuci QuCore u *Applications*; na Linuxu pokreni `.AppImage` (`chmod +x` prvi put).
+1. Pokreni instalaciju `QuCore-Setup-x.y.z.exe` i odaberi mapu (ili ostavi zadanu). Na macOS-u otvori `.dmg` i povuci QuCore u *Applications*; na Linuxu pokreni `.AppImage` (`chmod +x` prvi put).
 2. Otvori **QuCore**. Vidiš početni zaslon s gumbima **Nova konekcija** i **Novi upit**.
 3. Klikni **Nova konekcija** i upiši podatke svoje baze (poglavlje 3).
 4. Kad se konekcija pojavi lijevo, klikni na nju — QuCore se spoji i pokaže baze.
