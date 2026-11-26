@@ -1,0 +1,132 @@
+{
+  "name": "qucore",
+  "productName": "QuCore",
+  "desktopName": "qucore.desktop",
+  "version": "0.21.0",
+  "description": "Lightweight SQL editor for SQL Server, PostgreSQL and MariaDB",
+  "main": "./out/main/index.js",
+  "license": "MIT",
+  "author": "Dragan Bajlovic",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build:win": "electron-vite build && electron-builder --win",
+    "build:mac": "electron-vite build && electron-builder --mac",
+    "build:linux": "electron-vite build && electron-builder --linux",
+    "test:core": "node --experimental-strip-types --no-warnings scripts/test-core.ts",
+    "test:unit": "node --experimental-strip-types --no-warnings scripts/test-unit.ts",
+    "test:e2e": "electron-vite build && node scripts/e2e.mjs",
+    "db:up": "docker compose -f docker/compose.yml up -d --wait",
+    "db:down": "docker compose -f docker/compose.yml down",
+    "db:seed": "node --experimental-strip-types --no-warnings scripts/seed-test-db.ts",
+    "test:db": "npm run db:seed && npm run test:core",
+    "db:demo": "node --experimental-strip-types --no-warnings scripts/seed-demo-db.ts"
+  },
+  "build": {
+    "appId": "hr.sqlstudio.app",
+    "productName": "QuCore",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "out/**/*",
+      "resources/icon.png",
+      "resources/icon.ico",
+      "package.json"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "resources/icon.png",
+      "category": "public.app-category.developer-tools",
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "tar.gz",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "resources/icon.png",
+      "category": "Development",
+      "synopsis": "Lightweight SQL editor for SQL Server, PostgreSQL and MariaDB",
+      "artifactName": "${productName}-${version}-linux-${arch}.${ext}",
+      "syncDesktopName": true
+    }
+  },
+  "dependencies": {
+    "mssql": "^12.7.16",
+    "mysql2": "^3.24.6",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "@types/mssql": "^12.3.0",
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vectilume/react": "^0.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "@xyflow/react": "12.12.1",
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0",
+    "electron-vite": "^6.0.0",
+    "elkjs": "0.12.1",
+    "marked": "18.3.0",
+    "monaco-editor": "^0.57.0",
+    "playwright-core": "^1.65.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "sql-formatter": "^15.10.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  },
+  "optionalDependencies": {
+    "msnodesqlv8": "6.2.2"
+  },
+  "allowScripts": {
+    "msnodesqlv8": true,
+    "electron-winstaller": true
+  }
+}

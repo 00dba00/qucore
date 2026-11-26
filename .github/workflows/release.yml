@@ -1,0 +1,57 @@
+name: Release
+
+# Na tag vX.Y.Z: installeri za Windows, macOS i Linux u nacrtu GitHub izdanja (objavljuje se ručno).
+# Bez potpisa dok se ne odluči o certifikatima (vidi README, "Installing unsigned builds").
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            script: build:win
+            files: dist/*.exe
+          - os: macos-latest
+            script: build:mac
+            files: |
+              dist/*.dmg
+              dist/*.zip
+          - os: ubuntu-latest
+            script: build:linux
+            files: |
+              dist/*.AppImage
+              dist/*.tar.gz
+    runs-on: ${{ matrix.os }}
+    env:
+      # macOS: ne traži certifikat u keychainu (build bez potpisa).
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      # electron-builder ne objavljuje sam; izdanje radi korak ispod.
+      EP_PUBLISH: never
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test:unit
+      - run: npm run ${{ matrix.script }} -- --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qucore-${{ matrix.os }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
+      - if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: ${{ matrix.files }}
