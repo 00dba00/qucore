@@ -2,7 +2,7 @@
   "name": "qucore",
   "productName": "QuCore",
   "desktopName": "qucore.desktop",
-  "version": "0.21.0",
+  "version": "0.21.1",
   "description": "Lightweight SQL editor for SQL Server, PostgreSQL and MariaDB",
   "main": "./out/main/index.js",
   "license": "MIT",

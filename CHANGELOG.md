@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.21.1 (2026-11-26)
+
+- Builds: macOS and Linux installers build without the Windows-only SQL Server driver
+
 ## v0.21.0 (2026-11-26)
 
 - Platforms: QuCore builds for macOS (Intel and Apple Silicon) and Linux (AppImage, tar.gz), with a proper application menu on macOS

@@ -27,11 +27,13 @@ const q = quoteIdent.mssql
 type Mssql = typeof sql
 
 let v8Module: Promise<Mssql> | null = null
+/** Naziv kao varijabla: msnodesqlv8 postoji samo na Windowsu, pa typecheck ne smije ovisiti o njegovim tipovima. */
+const MSNODESQLV8 = 'msnodesqlv8'
 
 function loadModule(c: ConnectionConfig): Promise<Mssql> {
   if (c.mssqlAuth !== 'windows') return Promise.resolve(sql)
   if (process.platform !== 'win32') return Promise.reject(new Error(t('core.winAuthWindowsOnly')))
-  v8Module ??= Promise.all([import('msnodesqlv8'), import('mssql/msnodesqlv8.js')])
+  v8Module ??= Promise.all([import(/* @vite-ignore */ MSNODESQLV8), import('mssql/msnodesqlv8.js')])
     .then(([raw, m]) => {
       preferRealOdbcError((raw as { default?: unknown }).default ?? raw)
       return ((m as { default?: Mssql }).default ?? m) as Mssql

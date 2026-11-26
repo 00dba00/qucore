@@ -42,6 +42,9 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # msnodesqlv8 (Windows prijava na SQL Server preko ODBC-a) treba samo na Windowsu; drugdje se ne može izgraditi.
+      - if: runner.os != 'Windows'
+        run: rm -rf node_modules/msnodesqlv8
       - run: npm run typecheck
       - run: npm run test:unit
       - run: npm run ${{ matrix.script }} -- --publish never
