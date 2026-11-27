@@ -1,6 +1,8 @@
 import { join } from 'node:path'
-import type { DataJob, DataJobInput, JobRun, JobSource, ResultColumn } from '../shared/types'
-import { runDataJob, probeColumns, JobError, type JobPlan } from '../core/jobs/engine'
+import type { DataJob, DataJobInput, HttpTestResult, JobRun, JobSource, ResultColumn } from '../shared/types'
+import { runDataJob, probeColumns, testHttpJob, JobError, type JobPlan } from '../core/jobs/engine'
+import { validateHttpTarget } from '../core/jobs/http'
+import type { CredentialStore } from './credentialStore'
 import { substituteParams } from '../core/params'
 import { quoteIdent } from '../core/util'
 import type { ConnectionStore } from './connectionStore'
@@ -19,12 +21,15 @@ export class JobService {
     private workspace: WorkspaceStore,
     private store: ConnectionStore,
     /** Mape koje je korisnik odabrao u dijalogu (posao smije pisati samo u njih). */
-    private folders: FileGrants
+    private folders: FileGrants,
+    /** Prijave web servisa (HTTP odredište). */
+    private credentials: CredentialStore
   ) {}
 
   save(input: DataJobInput): DataJob {
     const d = input.config.destination
     if (d.kind === 'file' && !this.folders.has(d.folder)) throw new Error(t('main.jobFolderNotGranted'))
+    if (d.kind === 'http') validateHttpTarget(d)
     const batchSize = Math.min(MAX_BATCH, Math.max(1, Math.round(Number(input.config.batchSize) || DEFAULT_BATCH)))
     return this.workspace.saveJob({ ...input, config: { ...input.config, batchSize } })
   }
@@ -69,6 +74,21 @@ export class JobService {
     return { connectionId: conn.id, database, sql: substituteParams(saved.sql, conn.type, source.params ?? {}) }
   }
 
+  /** Spremljeni posao → plan za engine (izvor, varijable upita za HTTP predloške). */
+  private plan(job: DataJob): JobPlan {
+    const src = job.config.source
+    const variables =
+      src.kind === 'query' ? Object.fromEntries(Object.entries(src.params ?? {}).map(([k, v]) => [k, v.type === 'null' ? '' : v.value])) : undefined
+    return { name: job.name, source: this.resolveSource(src), columns: job.config.columns, destination: job.config.destination, batchSize: job.config.batchSize, variables }
+  }
+
+  /** Probni HTTP zahtjev s prvim retkom izvora spremljenog posla. */
+  testHttp(id: number): Promise<HttpTestResult> {
+    const job = this.workspace.getJob(id)
+    if (!job) throw new Error(t('main.jobMissing'))
+    return testHttpJob(this.plan(job), this.store, { credentials: this.credentials })
+  }
+
   sourceColumns(source: JobSource): Promise<ResultColumn[]> {
     return probeColumns(this.resolveSource(source), this.store)
   }
@@ -89,8 +109,7 @@ export class JobService {
     this.running.set(id, { abort, done: new Promise<void>((r) => (finish = r)) })
     try {
       if (d.kind === 'file' && !this.folders.has(d.folder)) throw new Error(t('main.jobFolderNotGranted'))
-      const plan: JobPlan = { name: job.name, source: this.resolveSource(job.config.source), columns: job.config.columns, destination: d, batchSize: job.config.batchSize }
-      const r = await runDataJob(plan, this.store, { signal: abort.signal, onProgress })
+      const r = await runDataJob(this.plan(job), this.store, { signal: abort.signal, onProgress, credentials: this.credentials })
       return this.workspace.finishJobRun(runId, { status: 'success', rowsRead: r.rowsRead, rowsWritten: r.rowsWritten, target: r.target })
     } catch (e) {
       const je = e instanceof JobError ? e : undefined
@@ -124,6 +143,7 @@ export class JobService {
   private describe(job: DataJob): string {
     const d = job.config.destination
     if (d.kind === 'file') return join(d.folder, d.fileName)
+    if (d.kind === 'http') return `${d.method} ${d.url}`
     const conn = this.store.get(d.connectionId)
     return `${conn?.name ?? '?'} / ${[d.database, d.schema, d.table].filter(Boolean).join('.')}`
   }

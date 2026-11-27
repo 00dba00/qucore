@@ -17,6 +17,7 @@
 import { _electron as electron } from 'playwright-core'
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { createServer } from 'node:http'
 import { en } from '../src/shared/locales/en.ts'
 import { hr } from '../src/shared/locales/hr.ts'
 
@@ -43,7 +44,7 @@ const D =
         idx: 'Table indexes', idxParam: 'table', old: 'Old report (missing table)', snip7: 'Last 7 days', snipSchema: 'Project schema',
         connDlgName: 'Production ERP', connDlgHost: 'sql01.company.local', file: 'biggest-tables.sql', fileComment: 'Biggest tables in the database',
         valueSql: `SELECT JSON_OBJECT('customer', 'Ana', 'items', JSON_ARRAY(1, 2, 3)) AS order_json,\n  '<order id="7"><item>coffee</item></order>' AS xml_column,\n  42 AS number`,
-        pause: 'pause', guideChapter: 'Projects', qs: 'tab', jobName: 'Daily table export', jobTable: 'table_overview'
+        pause: 'pause', guideChapter: 'Projects', qs: 'tab', jobName: 'Daily table export', jobTable: 'table_overview', httpJob: 'Tables to the catalog'
       }
     : {
         connName: 'Analitika (MariaDB)', localServer: 'Lokalni SQL Server', project: 'Demo analitika', projectDesc: 'Primjer projekta za vodič',
@@ -52,7 +53,7 @@ const D =
         idx: 'Indeksi tablice', idxParam: 'tablica', old: 'Stari izvještaj (nestala tablica)', snip7: 'Zadnjih 7 dana', snipSchema: 'Shema projekta',
         connDlgName: 'Produkcija ERP', connDlgHost: 'sql01.firma.local', file: 'velike-tablice.sql', fileComment: 'Najveće tablice u bazi',
         valueSql: `SELECT JSON_OBJECT('kupac', 'Ana', 'stavke', JSON_ARRAY(1, 2, 3)) AS narudzba,\n  '<narudzba id="7"><stavka>kava</stavka></narudzba>' AS xml_stupac,\n  42 AS broj`,
-        pause: 'pauza', guideChapter: 'Projekti', qs: 'tab', jobName: 'Dnevni izvoz tablica', jobTable: 'pregled_tablica'
+        pause: 'pauza', guideChapter: 'Projekti', qs: 'tab', jobName: 'Dnevni izvoz tablica', jobTable: 'pregled_tablica', httpJob: 'Tablice u katalog'
       }
 mkdirSync(out, { recursive: true })
 rmSync(profile, { recursive: true, force: true })
@@ -671,6 +672,48 @@ await step('36-job-database', async () => {
   await maskFolder(join(profile, 'exports'))
   await shot('36-job-database')
   await win.keyboard.press('Control+w')
+})
+
+await step('37-job-http', async () => {
+  // Lokalni servis umjesto pravog; na snimci se adresa prikazuje kao https://catalog.example.com.
+  const server = createServer((req, res) => {
+    req.resume()
+    req.on('end', () => {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end('{"status":"updated"}')
+    })
+  })
+  await new Promise((r) => server.listen(0, '127.0.0.1', r))
+  const base = `http://127.0.0.1:${server.address().port}`
+  try {
+    await panel(T('jobs.panelTitle'))
+    await win.click('.jobs-head button')
+    await win.waitForSelector('.job-tab')
+    await win.fill('.job-name', D.httpJob)
+    const src = win.locator(`section:has(h3:text-is("${T('jobs.source')}"))`)
+    const dst = win.locator(`section:has(h3:text-is("${T('jobs.destination')}"))`)
+    await src.locator(`label:text-is("${T('jobs.query')}") + select`).selectOption({ label: `${D.folder} / ${D.big}` })
+    await dst.locator(`label:has-text("${T('jobs.destHttp')}") input`).check()
+    await dst.locator(`label:text-is("${T('jobs.http.request')}") + .row select`).selectOption('PUT')
+    await dst.locator('.job-url').fill(`${base}/api/tables/{{table_name}}`)
+    await dst.locator('.job-headers button').click()
+    await dst.locator('.job-headers .row input >> nth=0').fill('X-Source')
+    await dst.locator('.job-headers .row input >> nth=1').fill('{{job}}')
+    await dst.locator('textarea').fill('{\n  "name": {{table_name}},\n  "rows": {{table_rows}},\n  "bytes": {{data_length}},\n  "checkedOn": "{{date}}"\n}')
+    await dst.locator(`button:has-text("${T('jobs.http.test')}")`).click()
+    await win.waitForSelector('.job-test .status-box.ok')
+    await win.waitForTimeout(3500) // obavijest o spremanju nestane
+    await win.evaluate(({ from, to }) => {
+      for (const i of document.querySelectorAll('input')) if (i.value.includes(from)) i.value = i.value.split(from).join(to)
+      const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) if (n.nodeValue.includes(from)) n.nodeValue = n.nodeValue.split(from).join(to)
+    }, { from: base, to: 'https://catalog.example.com' })
+    await win.locator('.job-body').evaluate((el) => (el.scrollTop = el.querySelectorAll('section')[2].offsetTop - 10))
+    await shot('37-job-http')
+    await win.keyboard.press('Control+w')
+  } finally {
+    server.close()
+  }
 })
 
 // ---------- 11. Vodič u aplikaciji ----------

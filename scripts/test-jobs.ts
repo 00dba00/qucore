@@ -6,9 +6,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FACTORIES } from '../src/core/manager.ts'
 import { ResultCollector } from '../src/core/util.ts'
-import { runDataJob, JobError, probeColumns, type JobPlan } from '../src/core/jobs/engine.ts'
+import { runDataJob, JobError, probeColumns, testHttpJob, type JobPlan } from '../src/core/jobs/engine.ts'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { insertSql, transferValue, type TransferValue } from '../src/core/jobs/sql.ts'
-import type { ConnectionConfig, DbType, JobDestination, ResultColumn } from '../src/shared/types.ts'
+import type { ConnectionConfig, DbType, JobDestination, JobHttpTarget, ResultColumn } from '../src/shared/types.ts'
 import { testConfigs as configs } from './test-db-config.ts'
 import { setLang } from '../src/shared/i18n.ts'
 
@@ -265,6 +267,86 @@ await check('prazan izvor: CSV samo sa zaglavljem; neuspjeh ne ostavlja datoteku
   assert.ok(!existsSync(join(dir, 'pada.csv')) && !existsSync(join(dir, 'pada.csv.part')))
 })
 rmSync(dir, { recursive: true, force: true })
+
+console.log(`web servis (izvor ${pgSrc.id})`)
+{
+  const received: { method: string; url: string; body: string; auth?: string }[] = []
+  let failId = 0
+  const server = createServer((req, res) => {
+    let body = ''
+    req.on('data', (c) => (body += c))
+    req.on('end', () => {
+      received.push({ method: req.method ?? '', url: req.url ?? '', body, auth: req.headers.authorization })
+      const m = /\/k\/(\d+)$/.exec(req.url ?? '')
+      if (m && Number(m[1]) === failId) {
+        res.writeHead(422, { 'content-type': 'application/json' })
+        res.end('{"error":"neispravan kupac"}')
+        return
+      }
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end('{"ok":true}')
+    })
+  })
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  const http = (patch: Partial<JobHttpTarget>): JobDestination => ({ kind: 'http', method: 'POST', url: `${base}/k/{{id}}`, headers: [], send: 'row', body: '', retries: 0, onError: 'stop', ...patch })
+  const first30 = 'SELECT id, name, amount, created, flag, data, note FROM job_src WHERE id <= 30 ORDER BY id'
+  try {
+    await check('po paketu: svi retci stižu, vrijednosti bez gubitka', async () => {
+      received.length = 0
+      const r = await runDataJob(plan(pgSrc, http({ send: 'batch', url: `${base}/bulk`, body: '{"izvor": "{{job}}", "items": {{rows}}}' })), resolver)
+      assert.equal(r.rowsWritten, N)
+      assert.equal(received.length, 3)
+      const items = received.flatMap((x) => (JSON.parse(x.body) as { items: Record<string, unknown>[] }).items)
+      assert.equal(items.length, N)
+      const e = expectedRow(1)
+      assert.deepEqual(items[0], { id: 1, name: e.name, amount: 1.25, created: e.created, flag: false, data: e.data.toString('base64'), note: 'n1' })
+      assert.equal(JSON.parse(received[0].body).izvor, 'test')
+    })
+    await check('po retku: zahtjev koji pada zaustavlja posao na tom retku', async () => {
+      received.length = 0
+      failId = 7
+      await assert.rejects(runDataJob(plan(pgSrc, http({}), first30), resolver), (e: unknown) => {
+        assert.ok(e instanceof JobError, String(e))
+        assert.equal(e.failedRowNumber, 7)
+        assert.equal(e.counts.rowsWritten, 6)
+        assert.match(e.message, /422.*neispravan kupac/)
+        return true
+      })
+      assert.equal(received.length, 7)
+    })
+    await check('po retku, nastavi na grešku: ostali retci poslani, greška na kraju', async () => {
+      received.length = 0
+      failId = 7
+      await assert.rejects(runDataJob(plan(pgSrc, http({ onError: 'continue' }), first30), resolver), (e: unknown) => {
+        assert.ok(e instanceof JobError, String(e))
+        assert.equal(e.counts.rowsWritten, 29)
+        assert.equal(e.failedRowNumber, 7)
+        assert.match(e.message, /1 od 30 redaka nije poslano/)
+        return true
+      })
+      assert.equal(received.length, 30)
+      failId = 0
+    })
+    await check('prijava (Bearer) i probni zahtjev s prvim retkom', async () => {
+      received.length = 0
+      const credentials = { resolveCredential: async () => ({ id: 'c', name: 'c', kind: 'bearer' as const, secret: 'tok' }) }
+      const d = http({ credentialId: 'c', method: 'PUT' })
+      const res = await testHttpJob(plan(pgSrc, d, first30), resolver, { credentials })
+      assert.equal(res.status, 200)
+      assert.equal(res.url, `${base}/k/1`)
+      assert.equal(JSON.parse(res.sent).id, 1)
+      assert.equal(received.length, 1)
+      assert.equal(received[0].method, 'PUT')
+      assert.equal(received[0].auth, 'Bearer tok')
+    })
+    await check('servis nije dostupan: jasna poruka', async () => {
+      await assert.rejects(runDataJob(plan(pgSrc, http({ url: 'http://127.0.0.1:1/x' }), first30), resolver), /nije dostupan/)
+    })
+  } finally {
+    server.close()
+  }
+}
 
 console.log('prekid i stupci izvora')
 for (const dst of configs) {

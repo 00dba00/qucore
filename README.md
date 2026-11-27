@@ -81,7 +81,9 @@ Pushing a `vX.Y.Z` tag builds all three platforms in GitHub Actions (`.github/wo
   the project's default environment, and each tab can switch.
 - **Variables**: `:customer_id` or `${date_from}` open a form before running; values are escaped per dialect and remembered per project.
 - **Data jobs**: move the result of a saved query (with its variables and environment) or a whole table into a table in
-  another database (add, add or update by key, replace all; the table can be created) or into a CSV, JSON or Excel file.
+  another database (add, add or update by key, replace all; the table can be created), into a CSV, JSON or Excel file, or to
+  a web service (per row or per batch, JSON body template, Bearer / Basic / API key / OAuth2 sign-ins stored encrypted,
+  retries, a test request with the first row).
   Rows stream in batches, a failed row is pinpointed, and every run is logged.
 - **History**: every run with a fingerprint (literals as `?`), so the same query with other values counts as the same;
   after 5 runs in 7 days QuCore suggests saving it.

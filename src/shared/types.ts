@@ -517,7 +517,78 @@ export interface JobFileTarget {
   delimiter?: ';' | ',' | '\t'
 }
 
-export type JobDestination = JobDatabaseTarget | JobFileTarget
+export type JobHttpMethod = 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'GET'
+
+export interface JobHttpHeader {
+  name: string
+  value: string
+}
+
+/** Poziv web servisa: po retku ili po paketu, tijelo kao JSON predložak. */
+export interface JobHttpTarget {
+  kind: 'http'
+  method: JobHttpMethod
+  /** Adresa; {{stupac}} (samo po retku), varijable upita, {{job}}, {{date}}, {{time}}. */
+  url: string
+  headers: JobHttpHeader[]
+  /** row = jedan zahtjev po retku, batch = jedan zahtjev po paketu. */
+  send: 'row' | 'batch'
+  /** JSON predložak; prazno = redak kao objekt (po retku) ili polje objekata (po paketu, {{rows}}). */
+  body: string
+  /** Spremljena prijava servisu (token, ključ…); bez vrijednosti = bez prijave. */
+  credentialId?: string
+  /** Ponovni pokušaji na 429, 5xx i mrežnu grešku. */
+  retries: number
+  /** stop = prvi neuspjeli zahtjev zaustavlja posao, continue = nastavi i na kraju javi koliko ih je palo. */
+  onError: 'stop' | 'continue'
+}
+
+export type JobDestination = JobDatabaseTarget | JobFileTarget | JobHttpTarget
+
+/** Prijava web servisu; tajna (token, lozinka, ključ, client secret) se nikad ne vraća u UI. */
+export type CredentialKind = 'bearer' | 'basic' | 'apiKey' | 'oauth2'
+
+export interface ServiceCredentialInfo {
+  id: string
+  name: string
+  kind: CredentialKind
+  /** basic: korisničko ime. */
+  user?: string
+  /** apiKey: naziv headera ili parametra i gdje ide. */
+  keyName?: string
+  keyIn?: 'header' | 'query'
+  /** oauth2 (client credentials). */
+  tokenUrl?: string
+  clientId?: string
+  scope?: string
+  hasSecret: boolean
+}
+
+export interface ServiceCredentialInput extends Omit<ServiceCredentialInfo, 'hasSecret' | 'id'> {
+  /** Bez id-a = nova prijava. */
+  id?: string
+  /** undefined = zadrži spremljenu tajnu. */
+  secret?: string
+}
+
+/** Puna prijava s tajnom — samo u main procesu i coreu. */
+export interface ServiceCredential extends Omit<ServiceCredentialInfo, 'hasSecret'> {
+  secret?: string
+}
+
+/** Odgovor na probni zahtjev. */
+export interface HttpTestResult {
+  method: JobHttpMethod
+  /** Adresa bez tajni (API ključ u adresi je skriven). */
+  url: string
+  status: number
+  statusText: string
+  durationMs: number
+  /** Početak tijela odgovora. */
+  body: string
+  /** Poslano tijelo (početak). */
+  sent: string
+}
 
 /** Stupac odredišta: iz stupca izvora ili konstanta. */
 export interface JobColumn {
@@ -685,6 +756,13 @@ export interface StudioApi {
     sourceColumns(source: JobSource): Promise<ResultColumn[]>
     /** Dijalog za mapu odredišne datoteke; null ako je odustao. */
     chooseFolder(): Promise<string | null>
+    /** Šalje jedan zahtjev s prvim retkom izvora (posao mora biti spremljen) i vraća odgovor servisa. */
+    testHttp(id: number): Promise<HttpTestResult>
+  }
+  credentials: {
+    list(): Promise<ServiceCredentialInfo[]>
+    save(c: ServiceCredentialInput): Promise<ServiceCredentialInfo>
+    remove(id: string): Promise<void>
   }
   files: {
     /** Dijalog Otvori (više datoteka); prazno ako je odustao. */

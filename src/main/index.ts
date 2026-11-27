@@ -9,12 +9,14 @@ import { ConnectionStore } from './connectionStore'
 import { WorkspaceStore, type NewRun } from './workspaceStore'
 import { FileGrants } from './fileGrants'
 import { JobService } from './jobs'
+import { CredentialStore } from './credentialStore'
 import { fingerprintSql, type FingerprintDialect } from '../core/fingerprint'
 import { analyzeSql } from '../core/sqlRefs'
 import type {
   ConnectionConfig,
   DataJobInput,
   JobSource,
+  ServiceCredentialInput,
   DbObject,
   DbRef,
   EditTable,
@@ -47,6 +49,7 @@ let workspace: WorkspaceStore
 let grants: FileGrants
 let jobs: JobService
 let folderGrants: FileGrants
+let credentials: CredentialStore
 
 // QUCORE_USER_DATA: zaseban profil za testove (ne dira pravi profil korisnika).
 const userData = process.env.QUCORE_USER_DATA || resolveUserData()
@@ -230,6 +233,10 @@ function registerIpc(): void {
   handle('jobs:cancel', (id: number) => jobs.cancel(id))
   handle('jobs:runs', (id: number, limit?: number) => workspace.jobRuns(id, limit))
   handle('jobs:sourceColumns', (source: JobSource) => jobs.sourceColumns(source))
+  handle('jobs:testHttp', (id: number) => jobs.testHttp(id))
+  handle('credentials:list', () => credentials.list())
+  handle('credentials:save', (c: ServiceCredentialInput) => credentials.save(c))
+  handle('credentials:remove', (id: string) => credentials.remove(id))
   handle('jobs:chooseFolder', async function () {
     const win = BrowserWindow.fromWebContents(this)
     const opts = { title: t('main.jobChooseFolderTitle'), properties: ['openDirectory', 'createDirectory'] as ('openDirectory' | 'createDirectory')[] }
@@ -381,7 +388,8 @@ app.whenReady().then(() => {
   workspace = new WorkspaceStore(join(app.getPath('userData'), 'qucore.db'))
   grants = new FileGrants(join(app.getPath('userData'), 'file-grants.json'))
   folderGrants = new FileGrants(join(app.getPath('userData'), 'folder-grants.json'))
-  jobs = new JobService(workspace, store, folderGrants)
+  credentials = new CredentialStore(join(app.getPath('userData'), 'credentials.json'))
+  jobs = new JobService(workspace, store, folderGrants, credentials)
   workspace.closeStaleJobRuns()
   importOldHistory(join(app.getPath('userData'), 'history.jsonl'))
   analyzeOldQueries()

@@ -683,7 +683,7 @@ QuCore compares a run with earlier runs of **the same query on the same database
 
 ## 21. Data jobs
 
-A job moves the result of a saved query, or a whole table, **into a table in another database** or **into a file** (CSV, JSON, Excel). You set it up once and run it whenever you need to. A job belongs to a project.
+A job moves the result of a saved query, or a whole table, **into a table in another database**, **into a file** (CSV, JSON, Excel) or **to a web service** (REST API). You set it up once and run it whenever you need to. A job belongs to a project.
 
 ### New job
 
@@ -719,6 +719,36 @@ Before the first run QuCore shows where the data comes from and where it goes. I
 - The **file name** may contain `{date}` (2026-11-27), `{time}` (143005) and `{job}` (the job name), for example `{job}-{date}`.
 - **If it exists**: *Overwrite* or *New file with a number* (`export (2).csv`).
 - The file is written under a temporary name and gets its real name only when the job succeeds, so a failed job never leaves a half-written file.
+
+### Sending to a web service
+
+A job can send the data to a service (REST API) instead of a database or a file: *Write to* → **Web service (HTTP)**.
+
+1. **Request**: the method (POST, PUT, PATCH, DELETE, GET) and the address, for example `https://crm.company.com/api/customers/{{id}}`.
+2. **Send**:
+   - *One request per row*: columns can be used in the address, headers and body.
+   - *One request per batch*: the body gets the rows of the batch as a JSON array (the batch size is the *Batch* field).
+3. **Sign-in**: choose a saved sign-in or *None*. *Sign-ins…* opens the list of sign-ins:
+   - *Bearer token*,
+   - *Basic* (user and password),
+   - *API key* in a header or in the address,
+   - *OAuth2 client credentials* (token URL, client ID, secret, scope; the token is fetched and renewed automatically).
+
+   The token, password and key are encrypted like connection passwords and are never shown again.
+4. **Headers**: extra headers, for example `X-Source: qucore`. Without a `Content-Type`, JSON is sent.
+5. **Body (JSON)**: empty sends the row as a JSON object (per batch: an array of objects). In a template:
+   - `{{column}}` inserts the value (`"text"`, a number, `null`),
+   - inside quotes it inserts only the text, for example `"QC-{{id}}"`,
+   - `{{rows}}` (per batch) inserts the array of rows, for example `{"items": {{rows}}}`,
+   - query variables and `{{job}}`, `{{date}}`, `{{time}}` and `{{now}}` are available too.
+6. **Retries**: on 408, 429, 5xx and network errors the request is repeated, waiting longer each time (`Retry-After` is respected).
+7. **On error**: *Stop the job* (the log shows the row the service did not accept, with its answer) or *Continue* (the other rows are sent, and at the end it says how many were not and which was first).
+
+**Send a test request** saves the job and sends **only the first row** of the source, then shows what was sent and what the service answered. This checks the address, sign-in and body before the real run. Note that the test request really reaches the service.
+
+![Sending to a web service with a test request](img/37-job-http.jpg)
+
+> If the address is `http://` (no TLS) and the job has a sign-in, QuCore warns that the sign-in and the data travel unencrypted.
 
 ### Runs
 
@@ -793,7 +823,7 @@ Good to know:
 | **Ctrl+T** / **Ctrl+W** | new / close tab |
 | **Ctrl+Tab** / **Ctrl+Shift+Tab** | next / previous tab |
 | **Ctrl+O** | open a .sql file (or drag it into the window) |
-| **Ctrl+S** | save the query (or save changes to a saved one); in a file tab, save to the file |
+| **Ctrl+S** | save the query (or save changes to a saved one); in a file tab, save to the file; in a job tab, save the job |
 | **Ctrl+Shift+S** | save as a new query |
 | **Ctrl+P** | saved queries and projects |
 | **Ctrl+Shift+P** | switch project |
@@ -823,7 +853,9 @@ Everything is in the `%APPDATA%\QuCore` folder. If you used a version older than
 | File | Contents |
 |---|---|
 | `connections.json` | connections; passwords encrypted (Windows DPAPI) |
-| `qucore.db` | projects, saved queries, versions, history, snippets, variable values (SQLite) |
+| `qucore.db` | projects, saved queries, versions, history, snippets, variable values, data jobs and their runs (SQLite) |
+| `folder-grants.json` | the folders you chose for job files; a job may write only to these |
+| `credentials.json` | sign-ins for web services; the token, password and key are encrypted like connection passwords |
 | `Local Storage` | settings, open tabs and their unsaved text (if restoring tabs is on), the active project (browser data inside the app) |
 | `file-grants.json` | the .sql files you opened or saved through QuCore; *Save to file* may write only to these without a dialog |
 | `history.jsonl.imported` | old history from versions up to 0.9 (a backup copy, can be deleted) |

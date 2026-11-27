@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import type { ColumnInfo, DbType, JobColumn, JobDatabaseTarget, JobDestination, ResultColumn } from '../../shared/types.ts'
+import type { ColumnInfo, DbType, HttpTestResult, JobColumn, JobDatabaseTarget, JobDestination, ResultColumn } from '../../shared/types.ts'
 import type { MetadataDriver, QuerySession } from '../driver.ts'
 import { FACTORIES, type ConnectionResolver } from '../manager.ts'
 import { ResultCollector, errorMessage, type PausableSource } from '../util.ts'
@@ -18,6 +18,8 @@ import {
   type TransferValue
 } from './sql.ts'
 import { expandFileName, openFileSink, uniqueFileName } from './files.ts'
+import { openHttpSink, testHttpRequest, type CredentialResolver, type HttpContext } from './http.ts'
+import { BatchError, SomeRowsFailed, rowObject } from './errors.ts'
 import { t } from '../../shared/i18n.ts'
 
 /** Posao s već razriješenim izvorom (konekcija, baza i SQL s uvrštenim varijablama). */
@@ -27,6 +29,8 @@ export interface JobPlan {
   columns: JobColumn[]
   destination: JobDestination
   batchSize: number
+  /** Vrijednosti varijabli izvornog upita (za HTTP predloške). */
+  variables?: Record<string, string>
 }
 
 export interface JobCounts {
@@ -37,8 +41,13 @@ export interface JobCounts {
 export interface JobHooks {
   onProgress?(p: JobCounts): void
   signal?: AbortSignal
-  /** Vrijeme za {date}/{time} u nazivu datoteke. */
+  /** Vrijeme za {date}/{time} u nazivu datoteke i HTTP predlošcima. */
   now?: Date
+  /** Prijave web servisa (HTTP odredište). */
+  credentials?: CredentialResolver
+  /** Za testove: zamjena za fetch i kraće čekanje između pokušaja. */
+  fetch?: typeof fetch
+  backoffMs?: number
 }
 
 export interface JobOutcome extends JobCounts {
@@ -63,17 +72,6 @@ export class JobError extends Error {
     this.cancelled = extra.cancelled ?? false
     this.failedRow = extra.failedRow
     this.failedRowNumber = extra.failedRowNumber
-  }
-}
-
-/** Upis paketa nije uspio; nosi retke paketa da se može pronaći koji je kriv. */
-class BatchError extends Error {
-  rows: TransferValue[][]
-  offset: number
-  constructor(cause: unknown, rows: TransferValue[][], offset: number) {
-    super(errorMessage(cause))
-    this.rows = rows
-    this.offset = offset
   }
 }
 
@@ -363,7 +361,21 @@ export async function runDataJob(plan: JobPlan, resolver: ConnectionResolver, ho
 
   const open = async (first: TransferValue[][]): Promise<Writer> => {
     const d = plan.destination
-    return d.kind === 'database' ? openDbWriter(d, outColumns!, first, resolver) : openFileWriter(d, outColumns!, plan.name, hooks.now ?? new Date())
+    if (d.kind === 'database') return openDbWriter(d, outColumns!, first, resolver)
+    if (d.kind === 'file') return openFileWriter(d, outColumns!, plan.name, hooks.now ?? new Date())
+    const sink = await openHttpSink(d, outColumns!, first, httpContext(plan, hooks))
+    return {
+      get target() {
+        return sink.target
+      },
+      createdTable: false,
+      get rowsWritten() {
+        return sink.rowsWritten
+      },
+      write: (rows, offset) => sink.write(rows, offset),
+      finish: () => sink.finish(),
+      abort: async () => {}
+    }
   }
 
   const stream: RowStream = new RowStream(
@@ -408,6 +420,7 @@ export async function runDataJob(plan: JobPlan, resolver: ConnectionResolver, ho
     await writer?.abort()
     let extra: { cancelled?: boolean; failedRow?: Record<string, unknown>; failedRowNumber?: number } = { cancelled }
     let message = cancelled ? t('core.jobCancelled') : errorMessage(err)
+    if (!cancelled && err instanceof SomeRowsFailed) extra = { failedRow: err.failedRow, failedRowNumber: err.failedRowNumber }
     if (!cancelled && err instanceof BatchError) {
       const i = writer?.locate && err.rows.length > 1 ? await writer.locate(err.rows).catch(() => undefined) : err.rows.length === 1 ? 0 : undefined
       if (i !== undefined) {
@@ -424,16 +437,57 @@ export async function runDataJob(plan: JobPlan, resolver: ConnectionResolver, ho
   }
 }
 
-/** Redak kao objekt za log (binarni podaci skraćeni). */
-function rowObject(columns: OutColumn[], row: TransferValue[]): Record<string, unknown> {
-  return Object.fromEntries(
-    columns.map((c, i) => {
-      const v = row[i]
-      if (!(v instanceof Uint8Array)) return [c.name, v]
-      const hex = Buffer.from(v.buffer, v.byteOffset, v.byteLength).subarray(0, 32).toString('hex').toUpperCase()
-      return [c.name, `0x${hex}${v.byteLength > 32 ? `… (${v.byteLength} B)` : ''}`]
-    })
-  )
+function httpContext(plan: JobPlan, hooks: JobHooks): HttpContext {
+  return {
+    jobName: plan.name,
+    variables: plan.variables,
+    now: hooks.now,
+    signal: hooks.signal,
+    credentials: hooks.credentials,
+    fetch: hooks.fetch,
+    backoffMs: hooks.backoffMs
+  }
+}
+
+/** Prvi redak izvora (i stupci); upit se prekida čim stigne. */
+async function firstRow(source: JobPlan['source'], resolver: ConnectionResolver): Promise<{ columns: ResultColumn[]; row?: unknown[]; dialect: DbType }> {
+  const config = await resolver.resolve(source.connectionId)
+  const session = FACTORIES[config.type].session(config, source.database)
+  let columns: ResultColumn[] | null = null
+  let row: unknown[] | undefined
+  const collector = new (class extends ResultCollector {
+    override startSet(c: ResultColumn[]): number {
+      if (!columns) columns = c
+      return super.startSet(c)
+    }
+    override addRow(raw: unknown[]): void {
+      const set = this.sets[this.sets.length - 1]
+      if (set) set.totalRows++
+      if (row || this.sets.length !== 1) return
+      row = raw
+      void session.cancel().catch(() => {})
+    }
+  })(0)
+  try {
+    await session.open()
+    const r = await session.execute(source.sql, collector)
+    const found = columns ?? r.resultSets[0]?.columns
+    if (!row && r.error) throw new Error(t('core.jobSourceFailed', r.error))
+    if (!found) throw new Error(t('core.jobNoResultSet'))
+    return { columns: found, row, dialect: config.type }
+  } finally {
+    await session.close().catch(() => {})
+  }
+}
+
+/** Probni HTTP zahtjev s prvim retkom izvora. */
+export async function testHttpJob(plan: JobPlan, resolver: ConnectionResolver, hooks: JobHooks = {}): Promise<HttpTestResult> {
+  const d = plan.destination
+  if (d.kind !== 'http') throw new Error('not an HTTP job')
+  const { columns, row, dialect } = await firstRow(plan.source, resolver)
+  if (!row) throw new Error(t('core.httpNoRows'))
+  const out = resolveColumns(columns, plan.columns)
+  return testHttpRequest(d, out, mapRow(row, out, dialect), httpContext(plan, hooks))
 }
 
 /** Stupci izvora: upit se izvodi samo dok ne stigne zaglavlje prvog result seta, pa se prekida. */

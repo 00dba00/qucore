@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { safeStorage } from 'electron'
+import { decryptSecret, encryptSecret } from './secrets'
 import type { ConnectionConfig, ConnectionInfo } from '../shared/types'
 import type { ConnectionResolver } from '../core/manager'
 import { t } from '../shared/i18n.ts'
@@ -42,24 +43,20 @@ export class ConnectionStore implements ConnectionResolver {
     return { ...rest, hasPassword: !!passwordEnc }
   }
 
-  private async encrypt(pw: string): Promise<string> {
-    // Windows (DPAPI) i macOS (Keychain) uvijek imaju enkripciju. Na Linuxu bez keyringa
-    // Electron nudi samo slabiju "basic_text" zaštitu — bolje nego čisti tekst.
-    if (!(await safeStorage.isAsyncEncryptionAvailable()) && process.platform === 'linux') safeStorage.setUsePlainTextEncryption(true)
-    if (!(await safeStorage.isAsyncEncryptionAvailable())) throw new Error(t('main.encryptionUnavailable'))
-    return (await safeStorage.encryptStringAsync(pw)).toString('base64')
+  private encrypt(pw: string): Promise<string> {
+    return encryptSecret(pw)
   }
 
   /** Dekriptira lozinku; ako je ključ u međuvremenu rotiran, odmah je ponovno kriptira i sprema. */
   private async decrypt(s?: StoredConnection): Promise<string | undefined> {
     const enc = s?.passwordEnc
     if (!s || !enc) return undefined
-    const { result, shouldReEncrypt } = await safeStorage.decryptStringAsync(Buffer.from(enc, 'base64'))
-    if (shouldReEncrypt) {
-      s.passwordEnc = await this.encrypt(result)
+    const { value, reEncrypted } = await decryptSecret(enc)
+    if (reEncrypted) {
+      s.passwordEnc = reEncrypted
       this.persist()
     }
-    return result
+    return value
   }
 
   /**

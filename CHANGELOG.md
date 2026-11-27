@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.23.0 (2026-11-27)
+
+- Jobs: send rows to a web service (REST API) per row or per batch, with a JSON body template, Bearer, Basic, API key or OAuth2 sign-ins stored encrypted, retries, and a test request with the first row
+
 ## v0.22.0 (2026-11-27)
 
 - Jobs: move the result of a saved query or a whole table into a table in another database (add, add or update by key, replace all, table created if missing) or into a CSV, JSON or Excel file, with a run log that shows the row where writing failed

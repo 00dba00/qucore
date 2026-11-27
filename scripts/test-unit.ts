@@ -18,6 +18,9 @@ import { groupForeignKeyRows, groupIndexes, parsePgFkDef, parsePgIndexDef } from
 import { WorkspaceStore } from '../src/main/workspaceStore.ts'
 import { adaptValue, createTableSql, insertSql, kindOf, mapRow, maxRowsPerStatement, resolveColumns, transferValue, upsertSql, type TransferValue } from '../src/core/jobs/sql.ts'
 import { expandFileName, uniqueFileName } from '../src/core/jobs/files.ts'
+import { openHttpSink, renderJson, renderText, testHttpRequest, validateHttpTarget } from '../src/core/jobs/http.ts'
+import { BatchError, SomeRowsFailed } from '../src/core/jobs/errors.ts'
+import type { JobHttpTarget, ServiceCredential } from '../src/shared/types.ts'
 import { setLang, t } from '../src/shared/i18n.ts'
 import { en } from '../src/shared/locales/en.ts'
 import { hr } from '../src/shared/locales/hr.ts'
@@ -847,6 +850,147 @@ await check('poslovi u bazi projekata: spremanje, nazivi, log izvođenja', () =>
     w.close()
     rmSync(jdir, { recursive: true, force: true })
   }
+})
+
+console.log('poslovi: web servis (HTTP)')
+await check('JSON predložak: vrijednosti, tekst u navodnicima, greške', () => {
+  const look = (v: Record<string, unknown>) => (n: string) => {
+    if (n in v) return v[n]
+    throw new Error(`nema ${n}`)
+  }
+  const r = renderJson('{"id": {{id}}, "kod": "K-{{id}}", "naziv": {{naziv}}, "q": "{{navod}}", "n": {{nista}}, "obj": {{o}}}', look({ id: 7, naziv: 'Ana "A"', navod: 'a"b\\c', nista: null, o: { x: [1] } }))
+  assert.deepEqual(JSON.parse(r), { id: 7, kod: 'K-7', naziv: 'Ana "A"', q: 'a"b\\c', n: null, obj: { x: [1] } })
+  // Navodnik s escapeom ne zbunjuje praćenje stringa.
+  assert.equal(JSON.parse(renderJson('{"a": "x\\"{{id}}", "b": {{id}}}', look({ id: 5 }))).b, 5)
+  assert.throws(() => renderJson('{"a": {{id}', look({ id: 1 })), /nije ispravan JSON/)
+  assert.throws(() => renderJson('{"a": {{x}}}', look({})), /nema x/)
+  assert.equal(renderText('https://x/{{a}}?q={{b}}', look({ a: 'š/č', b: null }), encodeURIComponent), 'https://x/%C5%A1%2F%C4%8D?q=')
+})
+
+/** Lažni fetch: bilježi zahtjeve, odgovara redom iz popisa (zadnji se ponavlja). */
+function fakeFetch(answers: { status: number; body?: string; headers?: Record<string, string> }[]) {
+  const calls: { url: string; method: string; headers: Record<string, string>; body?: string }[] = []
+  const f = (async (url: string | URL, init?: RequestInit) => {
+    calls.push({ url: String(url), method: init?.method ?? 'GET', headers: { ...(init?.headers as Record<string, string>) }, body: init?.body as string | undefined })
+    const a = answers[Math.min(calls.length - 1, answers.length - 1)]
+    return new Response(a.body ?? '{}', { status: a.status, headers: a.headers })
+  }) as typeof fetch
+  return { f, calls }
+}
+
+const httpCols = [
+  { name: 'id', from: 0, sourceType: 'int4' },
+  { name: 'iznos', from: 1, sourceType: 'numeric' },
+  { name: 'naziv', from: 2, sourceType: 'varchar' }
+]
+const target = (patch: Partial<JobHttpTarget> = {}): JobHttpTarget => ({
+  kind: 'http', method: 'POST', url: 'https://api.test/k/{{id}}', headers: [{ name: 'X-Job', value: '{{job}}' }], send: 'row', body: '', retries: 2, onError: 'stop', ...patch
+})
+const rows: TransferValue[][] = [[1, '1.25', 'Ana'], [2, '99999999999999999.99', null], [3, '3', 'Iva']]
+
+await check('po retku: adresa, header, tijelo; brojevi iz numeričkih stupaca', async () => {
+  const { f, calls } = fakeFetch([{ status: 200 }])
+  const sink = await openHttpSink(target(), httpCols, rows, { jobName: 'Kupci', fetch: f })
+  await sink.write(rows, 0)
+  assert.equal(await sink.finish(), 'POST https://api.test/k/{{id}}')
+  assert.equal(sink.rowsWritten, 3)
+  assert.deepEqual(calls.map((c) => c.url), ['https://api.test/k/1', 'https://api.test/k/2', 'https://api.test/k/3'])
+  assert.equal(calls[0].headers['X-Job'], 'Kupci')
+  assert.equal(calls[0].headers['Content-Type'], 'application/json; charset=utf-8')
+  assert.deepEqual(JSON.parse(calls[0].body!), { id: 1, iznos: 1.25, naziv: 'Ana' })
+  // Previše znamenki za broj: ostaje tekst.
+  assert.deepEqual(JSON.parse(calls[1].body!), { id: 2, iznos: '99999999999999999.99', naziv: null })
+})
+await check('po paketu: polje redaka i omotnica {{rows}}; GET bez tijela', async () => {
+  const a = fakeFetch([{ status: 201 }])
+  const s1 = await openHttpSink(target({ send: 'batch', url: 'https://api.test/bulk?d={{date}}' }), httpCols, rows, { jobName: 'x', fetch: a.f, now: new Date(2026, 10, 27) })
+  await s1.write(rows, 0)
+  assert.equal(a.calls.length, 1)
+  assert.equal(a.calls[0].url, 'https://api.test/bulk?d=2026-11-27')
+  assert.equal(JSON.parse(a.calls[0].body!).length, 3)
+  const b = fakeFetch([{ status: 200 }])
+  const s2 = await openHttpSink(target({ send: 'batch', url: 'https://api.test/bulk', body: '{"izvor": "{{job}}", "items": {{rows}}}' }), httpCols, rows, { jobName: 'CRM', fetch: b.f })
+  await s2.write(rows, 0)
+  const body = JSON.parse(b.calls[0].body!)
+  assert.equal(body.izvor, 'CRM')
+  assert.equal(body.items[2].naziv, 'Iva')
+  // Po paketu adresa ne zna stupce.
+  const bad = await openHttpSink(target({ send: 'batch' }), httpCols, rows, { jobName: 'x', fetch: fakeFetch([{ status: 200 }]).f })
+  await assert.rejects(bad.write(rows, 0), /\{\{id\}\} nije stupac/)
+  const g = fakeFetch([{ status: 200 }])
+  const s3 = await openHttpSink(target({ method: 'GET' }), httpCols, rows, { jobName: 'x', fetch: g.f })
+  await s3.write([rows[0]], 0)
+  assert.equal(g.calls[0].body, undefined)
+  assert.equal(g.calls[0].headers['Content-Type'], undefined)
+  assert.throws(() => validateHttpTarget(target({ method: 'GET', send: 'batch' })), /samo po retku/)
+  assert.throws(() => validateHttpTarget(target({ url: 'ftp://x' })), /nije ispravna/)
+})
+await check('ponovni pokušaji na 503 i 429 (Retry-After), pa uspjeh', async () => {
+  const { f, calls } = fakeFetch([{ status: 503 }, { status: 429, headers: { 'Retry-After': '0' } }, { status: 200 }])
+  const sink = await openHttpSink(target(), httpCols, rows, { jobName: 'x', fetch: f, backoffMs: 1 })
+  await sink.write([rows[0]], 0)
+  assert.equal(calls.length, 3)
+  assert.equal(sink.rowsWritten, 1)
+})
+await check('greška servisa: zaustavi s retkom ili nastavi i javi na kraju', async () => {
+  const stop = fakeFetch([{ status: 200 }, { status: 400, body: '{"error":"bad id"}' }])
+  const s1 = await openHttpSink(target(), httpCols, rows, { jobName: 'x', fetch: stop.f, backoffMs: 1 })
+  await assert.rejects(s1.write(rows, 10), (e: unknown) => {
+    assert.ok(e instanceof BatchError)
+    assert.equal(e.offset, 11)
+    assert.equal(e.rows.length, 1)
+    assert.match(e.message, /400.*bad id/)
+    return true
+  })
+  assert.equal(stop.calls.length, 2) // 400 se ne ponavlja
+  const cont = fakeFetch([{ status: 200 }, { status: 500 }, { status: 200 }])
+  const s2 = await openHttpSink(target({ onError: 'continue', retries: 0 }), httpCols, rows, { jobName: 'x', fetch: cont.f })
+  await s2.write(rows, 0)
+  assert.equal(s2.rowsWritten, 2)
+  await assert.rejects(s2.finish(), (e: unknown) => {
+    assert.ok(e instanceof SomeRowsFailed)
+    assert.equal(e.failedRowNumber, 2)
+    assert.match(e.message, /1 od 3 redaka nije poslano/)
+    return true
+  })
+})
+await check('prijave: Bearer, Basic, API ključ (header i adresa), OAuth2 s obnovom', async () => {
+  const cred = (c: Partial<ServiceCredential>) => ({ resolveCredential: async () => ({ id: 'c', name: 'c', kind: 'bearer' as const, secret: 's3cret', ...c }) })
+  const send = async (c: Partial<ServiceCredential>, answers = [{ status: 200 }]) => {
+    const fk = fakeFetch(answers)
+    const sink = await openHttpSink(target({ credentialId: 'c' }), httpCols, rows, { jobName: 'x', fetch: fk.f, credentials: cred(c) })
+    await sink.write([rows[0]], 0)
+    return fk.calls
+  }
+  assert.equal((await send({ kind: 'bearer' }))[0].headers.Authorization, 'Bearer s3cret')
+  assert.equal((await send({ kind: 'basic', user: 'ana' }))[0].headers.Authorization, 'Basic ' + Buffer.from('ana:s3cret').toString('base64'))
+  assert.equal((await send({ kind: 'apiKey', keyName: 'X-Key', keyIn: 'header' }))[0].headers['X-Key'], 's3cret')
+  assert.equal((await send({ kind: 'apiKey', keyName: 'key', keyIn: 'query' }))[0].url, 'https://api.test/k/1?key=s3cret')
+  // OAuth2: token, poziv; 401 → novi token i ponovljeni poziv.
+  const oauth = { id: 'o1', kind: 'oauth2' as const, tokenUrl: 'https://login.test/token', clientId: 'app', scope: 'w' }
+  const calls = await send(oauth, [
+    { status: 200, body: '{"access_token":"T1","expires_in":3600}' },
+    { status: 401 },
+    { status: 200, body: '{"access_token":"T2","expires_in":3600}' },
+    { status: 200 }
+  ])
+  assert.equal(calls[0].url, 'https://login.test/token')
+  assert.match(calls[0].body!, /grant_type=client_credentials&client_id=app&client_secret=s3cret&scope=w/)
+  assert.equal(calls[1].headers.Authorization, 'Bearer T1')
+  assert.equal(calls[3].headers.Authorization, 'Bearer T2')
+  // Token se pamti: idući posao ga ne traži ponovno.
+  const again = await send(oauth)
+  assert.equal(again.length, 1)
+  assert.equal(again[0].headers.Authorization, 'Bearer T2')
+})
+await check('probni zahtjev: odgovor i skriveni API ključ u adresi', async () => {
+  const { f } = fakeFetch([{ status: 422, body: '{"error":"x"}' }])
+  const credentials = { resolveCredential: async () => ({ id: 'c', name: 'c', kind: 'apiKey' as const, keyName: 'key', keyIn: 'query' as const, secret: 'tajna' }) }
+  const r = await testHttpRequest(target({ credentialId: 'c' }), httpCols, rows[0], { jobName: 'x', fetch: f, credentials })
+  assert.equal(r.status, 422)
+  assert.equal(r.url, 'https://api.test/k/1?key=***')
+  assert.equal(r.body, '{"error":"x"}')
+  assert.deepEqual(JSON.parse(r.sent), { id: 1, iznos: 1.25, naziv: 'Ana' })
 })
 
 console.log(`\n${passed} prošlo${process.exitCode ? ', ima grešaka' : ''}`)

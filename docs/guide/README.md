@@ -681,7 +681,7 @@ QuCore uspoređuje izvršavanje s prethodnima **istog upita na istoj bazi** i up
 
 ## 21. Poslovi prijenosa podataka
 
-Posao prenosi rezultat spremljenog upita ili cijelu tablicu **u tablicu druge baze** ili **u datoteku** (CSV, JSON, Excel). Postaviš ga jednom, a pokrećeš kad god treba. Posao pripada projektu.
+Posao prenosi rezultat spremljenog upita ili cijelu tablicu **u tablicu druge baze**, **u datoteku** (CSV, JSON, Excel) ili **na web servis** (REST API). Postaviš ga jednom, a pokrećeš kad god treba. Posao pripada projektu.
 
 ### Novi posao
 
@@ -717,6 +717,36 @@ Prije prvog pokretanja QuCore pokaže odakle i kamo idu podaci. Ako je odredišt
 - **Naziv datoteke** može sadržavati `{date}` (2026-11-27), `{time}` (143005) i `{job}` (naziv posla), npr. `{job}-{date}`.
 - **Ako postoji**: *Prepiši* ili *Nova datoteka s brojem* (`izvoz (2).csv`).
 - Datoteka se piše pod privremenim nazivom i pravi naziv dobije tek kad posao uspije, pa neuspjeli posao ne ostavlja napola zapisanu datoteku.
+
+### Slanje na web servis
+
+Posao može podatke poslati servisu (REST API) umjesto u bazu ili datoteku: *Upiši u* → **Web servis (HTTP)**.
+
+1. **Zahtjev**: metoda (POST, PUT, PATCH, DELETE, GET) i adresa, npr. `https://crm.firma.hr/api/kupci/{{id}}`.
+2. **Slanje**:
+   - *Jedan zahtjev po retku*: stupci se mogu koristiti u adresi, headerima i tijelu.
+   - *Jedan zahtjev po paketu*: tijelo dobije retke paketa kao JSON polje (veličina paketa je polje *Paket*).
+3. **Prijava**: odaberi spremljenu prijavu ili *Bez prijave*. *Prijave…* otvara popis prijava:
+   - *Bearer token*,
+   - *Basic* (korisnik i lozinka),
+   - *API ključ* u headeru ili u adresi,
+   - *OAuth2 client credentials* (adresa tokena, Client ID, secret, scope; token se sam dohvaća i obnavlja).
+
+   Token, lozinka i ključ kriptiraju se kao lozinke konekcija i više se ne prikazuju.
+4. **Headeri**: dodatni headeri, npr. `X-Source: qucore`. Ako ne zadaš `Content-Type`, šalje se JSON.
+5. **Tijelo (JSON)**: prazno šalje redak kao JSON objekt (po paketu: polje objekata). Predložak:
+   - `{{stupac}}` umeće vrijednost (`"tekst"`, broj, `null`),
+   - unutar navodnika umeće samo tekst, npr. `"QC-{{id}}"`,
+   - `{{rows}}` (po paketu) umeće polje redaka, npr. `{"items": {{rows}}}`,
+   - dostupne su i varijable upita te `{{job}}`, `{{date}}`, `{{time}}` i `{{now}}`.
+6. **Ponovni pokušaji**: na 408, 429, 5xx i mrežnu grešku zahtjev se ponavlja sa sve duljim čekanjem (poštuje se `Retry-After`).
+7. **Na grešku**: *Zaustavi posao* (log pokazuje redak koji servis nije prihvatio, s odgovorom servisa) ili *Nastavi* (ostali retci se šalju, a na kraju piše koliko ih nije poslano i koji je bio prvi).
+
+**Pošalji probni zahtjev** sprema posao i šalje **samo prvi redak** izvora, pa pokaže što je poslano i što je servis odgovorio. Tako provjeriš adresu, prijavu i tijelo prije pravog pokretanja. Pazi: i probni zahtjev stvarno stiže servisu.
+
+![Slanje na web servis s probnim zahtjevom](img/37-job-http.jpg)
+
+> Ako je adresa `http://` (bez TLS-a) a posao ima prijavu, QuCore upozori da prijava i podaci putuju nekriptirano.
 
 ### Izvođenja
 
@@ -823,6 +853,7 @@ Sve je u mapi `%APPDATA%\QuCore`. Ako si koristio verziju stariju od 0.17, aplik
 | `connections.json` | konekcije; lozinke kriptirane (Windows DPAPI) |
 | `qucore.db` | projekti, spremljeni upiti, verzije, povijest, snippeti, vrijednosti varijabli, poslovi prijenosa i njihova izvođenja (SQLite) |
 | `folder-grants.json` | mape koje si odabrao za datoteke poslova; posao smije pisati samo u njih |
+| `credentials.json` | prijave za web servise; token, lozinka i ključ kriptirani kao lozinke konekcija |
 | `Local Storage` | postavke, otvoreni tabovi i njihov nespremljeni tekst (ako je uključeno vraćanje tabova), aktivni projekt (podaci preglednika unutar aplikacije) |
 | `file-grants.json` | popis .sql datoteka koje si otvorio ili spremio kroz QuCore; samo u njih *Spremi u datoteku* smije pisati bez dijaloga |
 | `history.jsonl.imported` | stara povijest iz verzija do 0.9 (sigurnosna kopija, može se obrisati) |

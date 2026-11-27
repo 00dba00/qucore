@@ -62,8 +62,9 @@ npm run build:linux  # Linux AppImage i .tar.gz (na Linuxu)
   *tekst*, *broj*, *NULL* ili *SQL izraz*. Zadnje vrijednosti pamte se po projektu; povijest sprema predložak i vrijednosti,
   pa izvršavanje otvoreno iz povijesti nudi iste vrijednosti.
 - **Poslovi prijenosa podataka**: rezultat spremljenog upita (s varijablama i okruženjem) ili cijela tablica upisuje se
-  u tablicu druge baze (dodaj, dodaj ili ažuriraj po ključu, zamijeni sve; tablica se može kreirati) ili u CSV, JSON ili
-  Excel datoteku. Retci idu u paketima, redak koji padne se pronađe, a svako izvođenje se bilježi.
+  u tablicu druge baze (dodaj, dodaj ili ažuriraj po ključu, zamijeni sve; tablica se može kreirati), u CSV, JSON ili
+  Excel datoteku ili na web servis (po retku ili po paketu, JSON predložak tijela, prijave Bearer / Basic / API ključ /
+  OAuth2 kriptirane, ponovni pokušaji, probni zahtjev s prvim retkom). Retci idu u paketima, redak koji padne se pronađe, a svako izvođenje se bilježi.
 - **Zaštita**: tab na *prod* konekciji ima crveni okvir i oznaku PROD; INSERT/UPDATE/DELETE/MERGE/DDL/EXEC na produ traži
   potvrdu. `UPDATE`/`DELETE` bez `WHERE` i `TRUNCATE` (na bilo kojem okruženju) traže još i kvačicu *Razumijem da mijenja
   sve retke*. Spremljeni query pokrenut na drugoj bazi nego što je spremljen pita prije izvršavanja. Nakon izvršavanja tab

@@ -100,7 +100,13 @@ const api: StudioApi = {
     },
     runs: (id, limit) => call('jobs:runs', id, limit),
     sourceColumns: (source) => call('jobs:sourceColumns', source),
-    chooseFolder: () => call('jobs:chooseFolder')
+    chooseFolder: () => call('jobs:chooseFolder'),
+    testHttp: (id) => call('jobs:testHttp', id)
+  },
+  credentials: {
+    list: () => call('credentials:list'),
+    save: (c) => call('credentials:save', c),
+    remove: (id) => call('credentials:remove', id)
   },
   files: {
     open: () => call('files:open'),

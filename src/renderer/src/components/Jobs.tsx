@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { AlertTriangle, Folder, Play, Plus, Refresh, Save, Stop, SwapHorizontal, Trash } from '@vectilume/react'
+import { AlertTriangle, Folder, Play, Plus, Refresh, Save, Send, Stop, SwapHorizontal, Trash } from '@vectilume/react'
 import { api } from '../api'
 import { paramNames } from '../../../core/params'
 import type {
@@ -12,6 +12,12 @@ import type {
   JobDatabaseTarget,
   JobDestination,
   JobFileTarget,
+  JobHttpMethod,
+  JobHttpTarget,
+  HttpTestResult,
+  CredentialKind,
+  ServiceCredentialInfo,
+  ServiceCredentialInput,
   JobRun,
   JobSource,
   ParamType,
@@ -155,6 +161,7 @@ export function JobsPanel({
 
 function describeDestination(d: JobDestination, connections?: ConnectionInfo[]): string {
   if (d.kind === 'file') return `${d.format.toUpperCase()} · ${d.fileName}`
+  if (d.kind === 'http') return `${d.method} ${d.url}`
   const conn = connections?.find((c) => c.id === d.connectionId)
   return `${conn ? conn.name + ' / ' : ''}${[d.database, d.schema, d.table].filter(Boolean).join('.')}`
 }
@@ -237,7 +244,7 @@ export function JobTab({
     update({ source })
     setSourceCols(null)
   }
-  const setDest = (patch: Partial<JobDatabaseTarget> | Partial<JobFileTarget>) =>
+  const setDest = (patch: Partial<JobDatabaseTarget> | Partial<JobFileTarget> | Partial<JobHttpTarget>) =>
     update({ destination: { ...config.destination, ...patch } as JobDestination })
 
   const problem = validate(name, config)
@@ -370,7 +377,19 @@ export function JobTab({
 
         <section>
           <h3>{t('jobs.destination')}</h3>
-          <DestinationEditor destination={config.destination} connections={connections} onChange={setDest} onKind={(destination) => update({ destination })} notify={notify} />
+          <DestinationEditor
+            destination={config.destination}
+            connections={connections}
+            onChange={setDest}
+            onKind={(destination) => update({ destination })}
+            notify={notify}
+            onTest={async () => {
+              // Probni zahtjev ide sa spremljenim poslom (isti put kao pravo pokretanje).
+              const id = dirty || !jobId ? await save() : jobId
+              if (!id) return null
+              return api.jobs.testHttp(id)
+            }}
+          />
           <div className="form-grid job-grid">
             <label>{t('jobs.batchSize')}</label>
             <div className="row">
@@ -499,9 +518,12 @@ function validate(name: string, c: DataJobConfig): string | undefined {
   if (d.kind === 'database') {
     if (!d.connectionId || !d.database || !d.table.trim()) return t('jobs.err.destination')
     if (d.mode === 'upsert' && d.keyColumns.length === 0) return t('jobs.err.keys')
-  } else {
+  } else if (d.kind === 'file') {
     if (!d.folder) return t('jobs.err.folder')
     if (!d.fileName.trim()) return t('jobs.err.fileName')
+  } else {
+    if (!/^https?:\/\/\S+/i.test(d.url.trim())) return t('jobs.err.url')
+    if (d.method === 'GET' && d.send === 'batch') return t('jobs.err.getBatch')
   }
   return undefined
 }
@@ -772,13 +794,15 @@ function DestinationEditor({
   connections,
   onChange,
   onKind,
-  notify
+  notify,
+  onTest
 }: {
   destination: JobDestination
   connections: ConnectionInfo[]
-  onChange(patch: Partial<JobDatabaseTarget> | Partial<JobFileTarget>): void
+  onChange(patch: Partial<JobDatabaseTarget> | Partial<JobFileTarget> | Partial<JobHttpTarget>): void
   onKind(d: JobDestination): void
   notify(text: string, kind?: 'error' | 'info'): void
+  onTest(): Promise<HttpTestResult | null>
 }) {
   const db = d.kind === 'database' ? d : undefined
   const dbs = useDatabases(db?.connectionId)
@@ -799,6 +823,14 @@ function DestinationEditor({
         </label>
         <label>
           <input type="radio" checked={d.kind === 'file'} onChange={() => onKind(emptyJobConfig().destination)} /> {t('jobs.destFile')}
+        </label>
+        <label>
+          <input
+            type="radio"
+            checked={d.kind === 'http'}
+            onChange={() => onKind({ kind: 'http', method: 'POST', url: 'https://', headers: [], send: 'row', body: '', retries: 3, onError: 'stop' })}
+          />{' '}
+          {t('jobs.destHttp')}
         </label>
       </div>
       {d.kind === 'database' ? (
@@ -869,6 +901,8 @@ function DestinationEditor({
             <option value="batch">{t('jobs.tx.batch')}</option>
           </select>
         </>
+      ) : d.kind === 'http' ? (
+        <HttpEditor d={d} onChange={onChange} onTest={onTest} notify={notify} />
       ) : (
         <>
           <label>{t('jobs.format')}</label>
@@ -915,6 +949,295 @@ function DestinationEditor({
           </select>
         </>
       )}
+    </div>
+  )
+}
+
+// ---------- Web servis (HTTP) ----------
+
+const METHODS: JobHttpMethod[] = ['POST', 'PUT', 'PATCH', 'DELETE', 'GET']
+
+function HttpEditor({
+  d,
+  onChange,
+  onTest,
+  notify
+}: {
+  d: JobHttpTarget
+  onChange(patch: Partial<JobHttpTarget>): void
+  onTest(): Promise<HttpTestResult | null>
+  notify(text: string, kind?: 'error' | 'info'): void
+}) {
+  const [creds, setCreds] = useState<ServiceCredentialInfo[]>([])
+  const [manage, setManage] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [result, setResult] = useState<HttpTestResult | { error: string } | null>(null)
+  const loadCreds = useCallback(() => {
+    api.credentials.list().then(setCreds, () => setCreds([]))
+  }, [])
+  useEffect(loadCreds, [loadCreds])
+  const setHeader = (i: number, patch: Partial<{ name: string; value: string }>) => onChange({ headers: d.headers.map((h, k) => (k === i ? { ...h, ...patch } : h)) })
+  const insecure = d.url.trim().toLowerCase().startsWith('http://') && !!d.credentialId
+
+  return (
+    <>
+      <label>{t('jobs.http.request')}</label>
+      <div className="row">
+        <select value={d.method} onChange={(e) => onChange({ method: e.target.value as JobHttpMethod })}>
+          {METHODS.map((m) => (
+            <option key={m}>{m}</option>
+          ))}
+        </select>
+        <input className="job-url" value={d.url} placeholder="https://api.example.com/customers/{{id}}" onChange={(e) => onChange({ url: e.target.value })} />
+      </div>
+      <label>{t('jobs.http.send')}</label>
+      <div className="row">
+        <select value={d.send} onChange={(e) => onChange({ send: e.target.value as JobHttpTarget['send'] })}>
+          <option value="row">{t('jobs.http.perRow')}</option>
+          <option value="batch">{t('jobs.http.perBatch')}</option>
+        </select>
+        <span className="muted small">{d.send === 'row' ? t('jobs.http.perRowHint') : t('jobs.http.perBatchHint')}</span>
+      </div>
+      <label>{t('jobs.http.auth')}</label>
+      <div className="row">
+        <select value={d.credentialId ?? ''} onChange={(e) => onChange({ credentialId: e.target.value || undefined })}>
+          <option value="">{t('jobs.http.noAuth')}</option>
+          {creds.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name} ({t(`cred.kind.${c.kind}`)})
+            </option>
+          ))}
+          {d.credentialId && !creds.some((c) => c.id === d.credentialId) && <option value={d.credentialId}>{t('jobs.http.missingAuth')}</option>}
+        </select>
+        <button className="btn small-btn" onClick={() => setManage(true)}>
+          {t('jobs.http.manageAuth')}
+        </button>
+      </div>
+      {insecure && (
+        <>
+          <label />
+          <span className="job-warn small">
+            <AlertTriangle size={13} /> {t('jobs.http.insecure')}
+          </span>
+        </>
+      )}
+      <label className="top">{t('jobs.http.headers')}</label>
+      <div className="job-headers">
+        {d.headers.map((h, i) => (
+          <div className="row" key={i}>
+            <input value={h.name} placeholder="X-Source" style={{ width: 180 }} onChange={(e) => setHeader(i, { name: e.target.value })} />
+            <input value={h.value} placeholder="qucore" style={{ width: 260 }} onChange={(e) => setHeader(i, { value: e.target.value })} />
+            <button className="icon-btn" title={t('common.delete')} onClick={() => onChange({ headers: d.headers.filter((_, k) => k !== i) })}>
+              <Trash size={13} />
+            </button>
+          </div>
+        ))}
+        <button className="btn small-btn" onClick={() => onChange({ headers: [...d.headers, { name: '', value: '' }] })}>
+          <Plus size={13} /> {t('jobs.http.addHeader')}
+        </button>
+      </div>
+      {d.method !== 'GET' && (
+        <>
+          <label className="top">{t('jobs.http.body')}</label>
+          <div className="job-body-template">
+            <textarea
+              value={d.body}
+              rows={6}
+              spellCheck={false}
+              placeholder={d.send === 'row' ? '{\n  "id": {{id}},\n  "name": "{{name}}",\n  "source": "{{job}}"\n}' : '{\n  "items": {{rows}}\n}'}
+              onChange={(e) => onChange({ body: e.target.value })}
+            />
+            <span className="muted small">{d.send === 'row' ? t('jobs.http.bodyHintRow') : t('jobs.http.bodyHintBatch')}</span>
+          </div>
+        </>
+      )}
+      <label>{t('jobs.http.retries')}</label>
+      <div className="row">
+        <input type="number" min={0} max={10} value={d.retries} style={{ width: 70 }} onChange={(e) => onChange({ retries: Math.min(10, Math.max(0, Number(e.target.value) || 0)) })} />
+        <span className="muted small">{t('jobs.http.retriesHint')}</span>
+      </div>
+      <label>{t('jobs.http.onError')}</label>
+      <select value={d.onError} onChange={(e) => onChange({ onError: e.target.value as JobHttpTarget['onError'] })}>
+        <option value="stop">{t('jobs.http.stop')}</option>
+        <option value="continue">{t('jobs.http.continue')}</option>
+      </select>
+      <label />
+      <div className="job-test">
+        <div className="row">
+          <button
+            className="btn"
+            disabled={testing}
+            onClick={async () => {
+              setTesting(true)
+              setResult(null)
+              try {
+                const r = await onTest()
+                if (r) setResult(r)
+              } catch (e) {
+                setResult({ error: (e as Error).message })
+              } finally {
+                setTesting(false)
+              }
+            }}
+          >
+            {testing ? <span className="spinner" /> : <Send size={14} />} {t('jobs.http.test')}
+          </button>
+          <span className="muted small">{t('jobs.http.testHint')}</span>
+        </div>
+        {result && (
+          <div className={'status-box ' + ('error' in result || result.status >= 400 ? 'err' : 'ok')}>
+            {'error' in result
+              ? result.error
+              : `${result.method} ${result.url}\n→ ${result.status} ${result.statusText} · ${result.durationMs} ms\n\n${t('jobs.http.sent')}\n${result.sent || '—'}\n\n${t('jobs.http.response')}\n${result.body || '—'}`}
+          </div>
+        )}
+      </div>
+      {manage && (
+        <CredentialsDialog
+          notify={notify}
+          onClose={(chosen) => {
+            setManage(false)
+            loadCreds()
+            if (chosen) onChange({ credentialId: chosen })
+          }}
+        />
+      )}
+    </>
+  )
+}
+
+const CRED_KINDS: CredentialKind[] = ['bearer', 'basic', 'apiKey', 'oauth2']
+
+/** Prijave web servisa: popis lijevo, forma desno. Tajna se samo upisuje, nikad ne prikazuje. */
+function CredentialsDialog({ notify, onClose }: { notify(text: string, kind?: 'error' | 'info'): void; onClose(chosen?: string): void }) {
+  const [list, setList] = useState<ServiceCredentialInfo[]>([])
+  const empty = (): ServiceCredentialInput & { hasSecret?: boolean } => ({ name: '', kind: 'bearer', keyIn: 'header' })
+  const [form, setForm] = useState<ServiceCredentialInput & { hasSecret?: boolean }>(empty)
+  const [busy, setBusy] = useState(false)
+  const reload = useCallback(() => api.credentials.list().then(setList, () => setList([])), [])
+  useEffect(() => {
+    void reload()
+  }, [reload])
+  const set = (patch: Partial<ServiceCredentialInput>) => setForm((f) => ({ ...f, ...patch }))
+  const secretLabel = { bearer: t('cred.token'), basic: t('cred.password'), apiKey: t('cred.key'), oauth2: t('cred.clientSecret') }[form.kind]
+
+  return (
+    <div className="modal-backdrop" onMouseDown={() => onClose()}>
+      <div className="modal cred-modal" onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
+        <h2>{t('cred.title')}</h2>
+        <p className="muted small">{t('cred.intro')}</p>
+        <div className="cred-layout">
+          <div className="cred-list">
+            {list.map((c) => (
+              <button
+                key={c.id}
+                className={'cred-item' + (form.id === c.id ? ' active' : '')}
+                onClick={() => setForm({ ...c, secret: undefined })}
+              >
+                <span>{c.name}</span>
+                <span className="muted small">{t(`cred.kind.${c.kind}`)}</span>
+              </button>
+            ))}
+            <button className="btn small-btn" onClick={() => setForm(empty())}>
+              <Plus size={13} /> {t('cred.new')}
+            </button>
+          </div>
+          <form
+            className="form-grid cred-form"
+            onSubmit={async (e) => {
+              e.preventDefault()
+              setBusy(true)
+              try {
+                const saved = await api.credentials.save(form)
+                await reload()
+                setForm({ ...saved, secret: undefined })
+                notify(t('common.savedName', saved.name))
+              } catch (err) {
+                notify((err as Error).message, 'error')
+              } finally {
+                setBusy(false)
+              }
+            }}
+          >
+            <label>{t('common.name')}</label>
+            <input value={form.name} autoFocus onChange={(e) => set({ name: e.target.value })} />
+            <label>{t('cred.kind')}</label>
+            <select value={form.kind} onChange={(e) => set({ kind: e.target.value as CredentialKind })}>
+              {CRED_KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {t(`cred.kind.${k}`)}
+                </option>
+              ))}
+            </select>
+            {form.kind === 'basic' && (
+              <>
+                <label>{t('cred.user')}</label>
+                <input value={form.user ?? ''} onChange={(e) => set({ user: e.target.value })} />
+              </>
+            )}
+            {form.kind === 'apiKey' && (
+              <>
+                <label>{t('cred.keyName')}</label>
+                <div className="row">
+                  <input value={form.keyName ?? ''} placeholder={form.keyIn === 'query' ? 'api_key' : 'X-API-Key'} onChange={(e) => set({ keyName: e.target.value })} />
+                  <select value={form.keyIn ?? 'header'} onChange={(e) => set({ keyIn: e.target.value as 'header' | 'query' })}>
+                    <option value="header">{t('cred.inHeader')}</option>
+                    <option value="query">{t('cred.inQuery')}</option>
+                  </select>
+                </div>
+              </>
+            )}
+            {form.kind === 'oauth2' && (
+              <>
+                <label>{t('cred.tokenUrl')}</label>
+                <input value={form.tokenUrl ?? ''} placeholder="https://login.example.com/oauth2/token" onChange={(e) => set({ tokenUrl: e.target.value })} />
+                <label>Client ID</label>
+                <input value={form.clientId ?? ''} onChange={(e) => set({ clientId: e.target.value })} />
+                <label>Scope</label>
+                <input value={form.scope ?? ''} placeholder={t('cred.optional')} onChange={(e) => set({ scope: e.target.value })} />
+              </>
+            )}
+            <label>{secretLabel}</label>
+            <input
+              type="password"
+              autoComplete="off"
+              value={form.secret ?? ''}
+              placeholder={form.hasSecret ? t('cred.secretKept') : ''}
+              onChange={(e) => set({ secret: e.target.value })}
+            />
+            <div className="modal-actions cred-actions">
+              {form.id && (
+                <button
+                  type="button"
+                  className="btn danger"
+                  onClick={async () => {
+                    if (!window.confirm(t('cred.deleteConfirm', form.name))) return
+                    try {
+                      await api.credentials.remove(form.id!)
+                      await reload()
+                      setForm(empty())
+                    } catch (err) {
+                      notify((err as Error).message, 'error')
+                    }
+                  }}
+                >
+                  {t('common.delete')}
+                </button>
+              )}
+              <span style={{ flex: 1 }} />
+              <button type="submit" className="btn" disabled={busy || !form.name.trim()}>
+                {t('common.save')}
+              </button>
+              <button type="button" className="btn primary" disabled={!form.id} onClick={() => onClose(form.id)}>
+                {t('cred.use')}
+              </button>
+              <button type="button" className="btn" onClick={() => onClose()}>
+                {t('common.close')}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
     </div>
   )
 }
