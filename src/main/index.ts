@@ -8,10 +8,13 @@ import { ConnectionManager } from '../core/manager'
 import { ConnectionStore } from './connectionStore'
 import { WorkspaceStore, type NewRun } from './workspaceStore'
 import { FileGrants } from './fileGrants'
+import { JobService } from './jobs'
 import { fingerprintSql, type FingerprintDialect } from '../core/fingerprint'
 import { analyzeSql } from '../core/sqlRefs'
 import type {
   ConnectionConfig,
+  DataJobInput,
+  JobSource,
   DbObject,
   DbRef,
   EditTable,
@@ -42,6 +45,8 @@ let store: ConnectionStore
 let manager: ConnectionManager
 let workspace: WorkspaceStore
 let grants: FileGrants
+let jobs: JobService
+let folderGrants: FileGrants
 
 // QUCORE_USER_DATA: zaseban profil za testove (ne dira pravi profil korisnika).
 const userData = process.env.QUCORE_USER_DATA || resolveUserData()
@@ -212,6 +217,27 @@ function registerIpc(): void {
     if (!q || !v) throw new Error(t('main.versionMissing'))
     return saveQuery({ ...q, sql: v.sql })
   })
+  handle('jobs:list', (projectId: number) => workspace.listJobs(projectId))
+  handle('jobs:get', (id: number) => workspace.getJob(id))
+  handle('jobs:save', (j: DataJobInput) => jobs.save(j))
+  handle('jobs:remove', (id: number) => jobs.remove(id))
+  handle('jobs:run', function (id: number) {
+    // Napredak ide svim prozorima (posao može pratiti i tab koji ga nije pokrenuo).
+    return jobs.run(id, 'manual', (p) => {
+      for (const w of BrowserWindow.getAllWindows()) if (!w.webContents.isDestroyed()) w.webContents.send('jobs:progress', { jobId: id, ...p })
+    })
+  })
+  handle('jobs:cancel', (id: number) => jobs.cancel(id))
+  handle('jobs:runs', (id: number, limit?: number) => workspace.jobRuns(id, limit))
+  handle('jobs:sourceColumns', (source: JobSource) => jobs.sourceColumns(source))
+  handle('jobs:chooseFolder', async function () {
+    const win = BrowserWindow.fromWebContents(this)
+    const opts = { title: t('main.jobChooseFolderTitle'), properties: ['openDirectory', 'createDirectory'] as ('openDirectory' | 'createDirectory')[] }
+    const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+    if (r.canceled || !r.filePaths[0]) return null
+    folderGrants.add(r.filePaths[0])
+    return r.filePaths[0]
+  })
   handle('snippets:list', (projectId: number | null) => workspace.listSnippets(projectId))
   handle('snippets:save', (s: SnippetInput) => workspace.saveSnippet(s))
   handle('snippets:remove', (id: number) => workspace.removeSnippet(id))
@@ -354,6 +380,9 @@ app.whenReady().then(() => {
   manager = new ConnectionManager(store)
   workspace = new WorkspaceStore(join(app.getPath('userData'), 'qucore.db'))
   grants = new FileGrants(join(app.getPath('userData'), 'file-grants.json'))
+  folderGrants = new FileGrants(join(app.getPath('userData'), 'folder-grants.json'))
+  jobs = new JobService(workspace, store, folderGrants)
+  workspace.closeStaleJobRuns()
   importOldHistory(join(app.getPath('userData'), 'history.jsonl'))
   analyzeOldQueries()
   // Windows/Linux: bez izbornika (sve je u prozoru). macOS bez izbornika aplikacije nema Cmd+C/V/X/A ni Cmd+Q,
@@ -381,10 +410,13 @@ app.on('before-quit', (e) => {
   if (quitting || !manager) return
   e.preventDefault()
   quitting = true
-  manager.closeAll().finally(() => {
-    workspace?.close()
-    app.quit()
-  })
+  // Poslovi u tijeku se prekidaju i bilježe kraj prije zatvaranja baze projekata.
+  Promise.allSettled([jobs?.cancelAll()])
+    .then(() => manager.closeAll())
+    .finally(() => {
+      workspace?.close()
+      app.quit()
+    })
 })
 
 app.on('window-all-closed', () => {

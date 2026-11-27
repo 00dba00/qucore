@@ -27,10 +27,11 @@ Vrijedi za verziju **0.19**. Isti vodič je i u samoj aplikaciji: **F1** ili **?
 18. [Brzo traženje (Ctrl+P)](#18-brzo-traženje-ctrlp)
 19. [Zaštita: produkcija, upiti bez WHERE, kriva baza](#19-zaštita-produkcija-upiti-bez-where-kriva-baza)
 20. [Upozorenja nakon izvršavanja](#20-upozorenja-nakon-izvršavanja)
-21. [Postavke](#21-postavke)
-22. [Prečaci](#22-prečaci)
-23. [Gdje su moji podaci](#23-gdje-su-moji-podaci)
-24. [Česta pitanja](#24-česta-pitanja)
+21. [Poslovi prijenosa podataka](#21-poslovi-prijenosa-podataka)
+22. [Postavke](#22-postavke)
+23. [Prečaci](#23-prečaci)
+24. [Gdje su moji podaci](#24-gdje-su-moji-podaci)
+25. [Česta pitanja](#25-česta-pitanja)
 
 ---
 
@@ -198,7 +199,7 @@ Korisno je znati:
 - Ista datoteka se ne otvara dvaput — Ctrl+O na već otvorenu samo je aktivira.
 - U tabu datoteke **Ctrl+S sprema u datoteku**, ne u spremljene upite. Da je dodaš u projekt, koristi **Ctrl+Shift+S** (spremi kao novi upit).
 - Datoteke veće od 20 MB se ne otvaraju (editor za njih nije prikladan).
-- Ako su uključeni [vraćeni tabovi](#21-postavke), tab datoteke se vraća i nakon ponovnog pokretanja, zajedno s nespremljenim izmjenama i oznakom ●.
+- Ako su uključeni [vraćeni tabovi](#22-postavke), tab datoteke se vraća i nakon ponovnog pokretanja, zajedno s nespremljenim izmjenama i oznakom ●.
 
 ### Izvršavanje
 
@@ -260,7 +261,7 @@ Zadano je uključen **Auto-commit**: svaka naredba se odmah trajno sprema u bazu
 - **Commit nije moguć dok rezultat čeka ostatak redaka** (*Max redaka*): najprije *Učitaj još* do kraja ili ga zatvori. Na PostgreSQL-u zatvaranje takvog rezultata prekida upit, a to ruši cijelu transakciju (dobiješ crvenu oznaku).
 - **Spremanje izmjena iz tablice** (poglavlje 7) ide preko zasebne veze, pa je zabranjeno dok je transakcija otvorena — napravi Commit ili Rollback pa spremi.
 - Kvačica Auto-commit pamti se po tabu (i nakon ponovnog pokretanja); otvorena transakcija se ne pamti — zatvaranje aplikacije je uvijek zatvara.
-- Kako se otvaraju novi tabovi (s Auto-commitom ili bez, posebno za produkciju) biraš u [Postavkama](#21-postavke).
+- Kako se otvaraju novi tabovi (s Auto-commitom ili bez, posebno za produkciju) biraš u [Postavkama](#22-postavke).
 
 ### Plan izvršavanja (zašto je upit spor)
 
@@ -643,7 +644,7 @@ Snippet je spremljeni komad SQL-a (npr. `WHERE created_at >= CURRENT_DATE - INTE
 
 ## 19. Zaštita: produkcija, upiti bez WHERE, kriva baza
 
-Sve tri zaštite su zadano uključene; svaku možeš isključiti u [Postavkama](#21-postavke), gdje piše i što time riskiraš.
+Sve tri zaštite su zadano uključene; svaku možeš isključiti u [Postavkama](#22-postavke), gdje piše i što time riskiraš.
 
 ### Produkcija
 
@@ -678,7 +679,59 @@ QuCore uspoređuje izvršavanje s prethodnima **istog upita na istoj bazi** i up
 
 ---
 
-## 21. Postavke
+## 21. Poslovi prijenosa podataka
+
+Posao prenosi rezultat spremljenog upita ili cijelu tablicu **u tablicu druge baze** ili **u datoteku** (CSV, JSON, Excel). Postaviš ga jednom, a pokrećeš kad god treba. Posao pripada projektu.
+
+### Novi posao
+
+1. Odaberi projekt na vrhu i otvori karticu **Poslovi** u bočnoj traci (ikona s dvije strelice).
+2. Klikni **Novi posao** i upiši naziv.
+3. **Izvor**: *Spremljeni upit* iz projekta ili *Cijela tablica*. Ako upit ima varijable (poglavlje 16), upiši njihove vrijednosti. Ako je vezan na alias (poglavlje 15), odaberi okruženje.
+4. **Stupci**: zadano se upisuju svi stupci izvora pod istim nazivima. Isključi to ako želiš odabrati stupce, preimenovati ih ili dodati stalnu vrijednost (npr. oznaku izvora). *Učitaj stupce izvora* izvodi upit samo dok ne stigne zaglavlje rezultata.
+5. **Odredište**: tablica u bazi ili datoteka (vidi dolje).
+6. **Spremi** (Ctrl+S) pa **Pokreni**.
+
+![Posao koji izvozi u CSV](img/35-job.jpg)
+
+Prije prvog pokretanja QuCore pokaže odakle i kamo idu podaci. Ako je odredište konekcija označena kao *prod*, to pita pri svakom pokretanju, uz crveno upozorenje.
+
+### Upis u tablicu
+
+- Odaberi konekciju, bazu, (shemu) i tablicu. Postojeća tablica mora imati sve stupce koji se upisuju. *Kreiraj tablicu ako ne postoji* napravi novu tablicu s tipovima prema izvoru.
+- **Retci**:
+  - *Dodaj*: retci se dodaju u tablicu.
+  - *Dodaj ili ažuriraj*: redak s istim vrijednostima **ključnih stupaca** se ažurira, ostali se dodaju. Tablica na tim stupcima treba primarni ili jedinstveni ključ (nova tablica ga dobije sama).
+  - *Zamijeni sve*: najprije se obrišu svi retci tablice.
+- **Transakcija**:
+  - *Sve ili ništa*: greška poništi sve, tablica ostaje kakva je bila.
+  - *Potvrdi nakon svakog paketa*: već upisani paketi ostaju i kad kasniji padne.
+- Prijenos radi i između različitih baza (npr. SQL Server → PostgreSQL). Datumi, decimale, tekst s dijakriticima i binarni podaci prenose se bez gubitka.
+
+![Upis u tablicu druge baze](img/36-job-database.jpg)
+
+### Upis u datoteku
+
+- **Format**: CSV (razdjelnik točka-zarez, zarez ili tab), JSON ili Excel (najviše 1 048 575 redaka).
+- **Mapa** se bira gumbom *Odaberi mapu*. Posao smije pisati samo u mape koje si sam odabrao.
+- **Naziv datoteke** može sadržavati `{date}` (2026-11-27), `{time}` (143005) i `{job}` (naziv posla), npr. `{job}-{date}`.
+- **Ako postoji**: *Prepiši* ili *Nova datoteka s brojem* (`izvoz (2).csv`).
+- Datoteka se piše pod privremenim nazivom i pravi naziv dobije tek kad posao uspije, pa neuspjeli posao ne ostavlja napola zapisanu datoteku.
+
+### Izvođenja
+
+Ispod forme je popis izvođenja: početak, trajanje, broj pročitanih i upisanih redaka i kamo je upisano. Točka u boji pokazuje ishod (zelena: uspješno, crvena: greška, žuta: prekinuto). Ista točka je i uz posao u kartici Poslovi.
+
+- **Klik na neuspjelo izvođenje** pokaže poruku i, kad se dao pronaći, **redak na kojem je upis pao** (redni broj i vrijednosti).
+- **Prekini** zaustavlja posao. Uz *Sve ili ništa* ništa ne ostaje upisano.
+- Prenosi se samo prvi rezultat upita. Ako upit vrati više rezultata (npr. procedura), ostali se preskaču.
+- Posao radi dok je QuCore otvoren, a zatvaranje aplikacije ga prekida. Pokretanje po rasporedu, i kad QuCore nije otvoren, planirano je za iduću verziju.
+
+> Velike tablice čitaju se u paketima (zadano 500 redaka). Dok se paket upisuje, čitanje izvora čeka, pa memorija ne raste ni kod milijuna redaka.
+
+---
+
+## 22. Postavke
 
 Neka ponašanja QuCorea su kompromis između sigurnosti i brzine rada — npr. potvrda prije pisanja na produkciji ili Auto-commit. **Ti odlučuješ** kako ih želiš. Zadane vrijednosti odgovaraju onome kako je QuCore radio prije nego što su postavke postojale — dakle ništa se ne mijenja dok sam ne promijeniš. Jedna zadana vrijednost i sama nosi rizik i zato odmah pokazuje upozorenje: Auto-commit na produkciji je uključen.
 
@@ -707,7 +760,7 @@ Korisno je znati:
 
 - Postavke Auto-commit i Max redaka vrijede za **tabove koje otvoriš nakon promjene**; otvoreni tabovi zadržavaju svoje (u toolbaru ih možeš promijeniti i ručno).
 - Ostale postavke vrijede odmah, u svim tabovima.
-- Postavke su spremljene u profilu aplikacije (vidi [Gdje su moji podaci](#23-gdje-su-moji-podaci)).
+- Postavke su spremljene u profilu aplikacije (vidi [Gdje su moji podaci](#24-gdje-su-moji-podaci)).
 
 ### Jezik sučelja
 
@@ -728,7 +781,7 @@ Korisno je znati:
 
 ---
 
-## 22. Prečaci
+## 23. Prečaci
 
 | Prečac | Radnja |
 |---|---|
@@ -738,7 +791,7 @@ Korisno je znati:
 | **Ctrl+T** / **Ctrl+W** | novi / zatvori tab |
 | **Ctrl+Tab** / **Ctrl+Shift+Tab** | sljedeći / prethodni tab |
 | **Ctrl+O** | otvori .sql datoteku (ili je povuci u prozor) |
-| **Ctrl+S** | spremi upit (ili spremi izmjene spremljenog); u tabu datoteke — spremi u datoteku |
+| **Ctrl+S** | spremi upit (ili spremi izmjene spremljenog); u tabu datoteke — spremi u datoteku; u tabu posla — spremi posao |
 | **Ctrl+Shift+S** | spremi kao novi upit |
 | **Ctrl+P** | spremljeni upiti i projekti |
 | **Ctrl+Shift+P** | promjena projekta |
@@ -761,14 +814,15 @@ Korisno je znati:
 
 ---
 
-## 23. Gdje su moji podaci
+## 24. Gdje su moji podaci
 
 Sve je u mapi `%APPDATA%\QuCore`. Ako si koristio verziju stariju od 0.17, aplikacija pri prvom pokretanju sama preimenuje staru mapu `%APPDATA%\SQL Studio` u `QuCore`, a konekcije, lozinke i povijest ostaju.
 
 | Datoteka | Sadržaj |
 |---|---|
 | `connections.json` | konekcije; lozinke kriptirane (Windows DPAPI) |
-| `qucore.db` | projekti, spremljeni upiti, verzije, povijest, snippeti, vrijednosti varijabli (SQLite) |
+| `qucore.db` | projekti, spremljeni upiti, verzije, povijest, snippeti, vrijednosti varijabli, poslovi prijenosa i njihova izvođenja (SQLite) |
+| `folder-grants.json` | mape koje si odabrao za datoteke poslova; posao smije pisati samo u njih |
 | `Local Storage` | postavke, otvoreni tabovi i njihov nespremljeni tekst (ako je uključeno vraćanje tabova), aktivni projekt (podaci preglednika unutar aplikacije) |
 | `file-grants.json` | popis .sql datoteka koje si otvorio ili spremio kroz QuCore; samo u njih *Spremi u datoteku* smije pisati bez dijaloga |
 | `history.jsonl.imported` | stara povijest iz verzija do 0.9 (sigurnosna kopija, može se obrisati) |
@@ -779,7 +833,7 @@ Zašto `file-grants.json`: QuCore čita i sprema samo datoteke koje si sam odabr
 
 ---
 
-## 24. Česta pitanja
+## 25. Česta pitanja
 
 **Upit se ne pokreće, nego se otvori prozor.** To je forma za varijable (poglavlje 16) ili potvrda zaštite (poglavlje 19).
 

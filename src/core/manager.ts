@@ -27,7 +27,7 @@ import { analyzeSql } from './sqlRefs.ts'
 import { buildEditStatements, literalSql } from './edits.ts'
 import { t } from '../shared/i18n.ts'
 
-const FACTORIES: Record<DbType, DriverFactory> = {
+export const FACTORIES: Record<DbType, DriverFactory> = {
   mssql: mssqlFactory,
   postgres: postgresFactory,
   mariadb: mariadbFactory

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SignPath artifact configuration "installer": the NSIS installer QuCore-Setup-<version>.exe, uploaded by the
+     Release workflow as a ZIP artifact. The QuCore.exe inside was already signed by "app-exe".
+     Paste into SignPath (project qucore, slug installer). -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="QuCore-Setup-*.exe">
+      <authenticode-sign description="QuCore Setup" description-url="https://github.com/00dba00/qucore" />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

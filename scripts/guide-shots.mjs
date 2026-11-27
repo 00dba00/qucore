@@ -43,7 +43,7 @@ const D =
         idx: 'Table indexes', idxParam: 'table', old: 'Old report (missing table)', snip7: 'Last 7 days', snipSchema: 'Project schema',
         connDlgName: 'Production ERP', connDlgHost: 'sql01.company.local', file: 'biggest-tables.sql', fileComment: 'Biggest tables in the database',
         valueSql: `SELECT JSON_OBJECT('customer', 'Ana', 'items', JSON_ARRAY(1, 2, 3)) AS order_json,\n  '<order id="7"><item>coffee</item></order>' AS xml_column,\n  42 AS number`,
-        pause: 'pause', guideChapter: 'Projects', qs: 'tab'
+        pause: 'pause', guideChapter: 'Projects', qs: 'tab', jobName: 'Daily table export', jobTable: 'table_overview'
       }
     : {
         connName: 'Analitika (MariaDB)', localServer: 'Lokalni SQL Server', project: 'Demo analitika', projectDesc: 'Primjer projekta za vodič',
@@ -52,7 +52,7 @@ const D =
         idx: 'Indeksi tablice', idxParam: 'tablica', old: 'Stari izvještaj (nestala tablica)', snip7: 'Zadnjih 7 dana', snipSchema: 'Shema projekta',
         connDlgName: 'Produkcija ERP', connDlgHost: 'sql01.firma.local', file: 'velike-tablice.sql', fileComment: 'Najveće tablice u bazi',
         valueSql: `SELECT JSON_OBJECT('kupac', 'Ana', 'stavke', JSON_ARRAY(1, 2, 3)) AS narudzba,\n  '<narudzba id="7"><stavka>kava</stavka></narudzba>' AS xml_stupac,\n  42 AS broj`,
-        pause: 'pauza', guideChapter: 'Projekti', qs: 'tab'
+        pause: 'pauza', guideChapter: 'Projekti', qs: 'tab', jobName: 'Dnevni izvoz tablica', jobTable: 'pregled_tablica'
       }
 mkdirSync(out, { recursive: true })
 rmSync(profile, { recursive: true, force: true })
@@ -621,7 +621,59 @@ await step('23-anomaly', async () => {
   await shot('23-anomaly')
 })
 
-// ---------- 10. Vodič u aplikaciji ----------
+// ---------- 10. Poslovi prijenosa podataka ----------
+// Izvoz u CSV u privremenom profilu (dijalog za mapu zamijenjen); forma za upis u bazu se samo snimi, ne pokreće.
+// Putanja privremenog profila (korisničko ime, temp mapa) se na snimci prikazuje kao neutralna mapa.
+const SHOWN_FOLDER = String.raw`C:\Users\ana\Documents\Exports`
+const maskFolder = (folder) =>
+  win.evaluate(
+    ({ folder, shown }) => {
+      for (const i of document.querySelectorAll('.job-tab input')) if (i.value.startsWith(folder)) i.value = shown + i.value.slice(folder.length)
+      const walk = document.createTreeWalker(document.querySelector('.job-tab[style*="flex"]') ?? document.body, NodeFilter.SHOW_TEXT)
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) if (n.nodeValue.includes(folder)) n.nodeValue = n.nodeValue.split(folder).join(shown)
+      for (const el of document.querySelectorAll('[title]')) if (el.title.includes(folder)) el.title = el.title.split(folder).join(shown)
+    },
+    { folder, shown: SHOWN_FOLDER }
+  )
+await step('35-job', async () => {
+  const folder = join(profile, 'exports')
+  mkdirSync(folder, { recursive: true })
+  await app.evaluate(({ dialog }, path) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] })
+  }, folder)
+  await closeAllTabs()
+  await panel(T('jobs.panelTitle'))
+  await win.click('.jobs-head button')
+  await win.waitForSelector('.job-tab')
+  await win.fill('.job-name', D.jobName)
+  const src = win.locator(`section:has(h3:text-is("${T('jobs.source')}"))`)
+  await src.locator(`label:text-is("${T('jobs.query')}") + select`).selectOption({ label: `${D.folder} / ${D.big}` })
+  await win.click(`button:has-text("${T('jobs.chooseFolder')}")`)
+  await win.waitForFunction(() => [...document.querySelectorAll('.job-tab input[readonly]')].some((i) => i.value))
+  await win.click(`.job-toolbar button:has-text("${T('jobs.run')}")`)
+  await win.click(`.modal button:has-text("${T('jobs.run')}")`)
+  await win.waitForSelector('.job-runs tbody tr .job-status.success')
+  await win.waitForTimeout(3500) // obavijest o završetku nestane
+  await maskFolder(folder)
+  await shot('35-job')
+})
+
+await step('36-job-database', async () => {
+  const dst = win.locator(`section:has(h3:text-is("${T('jobs.destination')}"))`)
+  await dst.locator(`label:has-text("${T('jobs.destDatabase')}") input`).check()
+  await dst.locator(`label:text-is("${T('jobs.connection')}") + select`).selectOption({ label: `${D.connName} (prod)` })
+  await dst.locator(`label:text-is("${T('jobs.database')}") + select option:text-is("${DB}")`).waitFor({ state: 'attached' })
+  await dst.locator(`label:text-is("${T('jobs.database')}") + select`).selectOption(DB)
+  await dst.locator('input[list="job-dest-tables"]').fill(D.jobTable)
+  await dst.locator(`label:text-is("${T('jobs.writeMode')}") + .row select`).selectOption('upsert')
+  await dst.locator(`label:text-is("${T('jobs.keys')}") + .row input`).fill('table_name')
+  await win.locator('.job-body').evaluate((el) => (el.scrollTop = 0))
+  await maskFolder(join(profile, 'exports'))
+  await shot('36-job-database')
+  await win.keyboard.press('Control+w')
+})
+
+// ---------- 11. Vodič u aplikaciji ----------
 await step('24-guide', async () => {
   await win.keyboard.press('F1')
   await win.waitForSelector('.guide-tab .guide-chapter')

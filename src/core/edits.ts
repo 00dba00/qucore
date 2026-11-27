@@ -9,7 +9,7 @@ export interface EditTarget {
   table: string
 }
 
-function tableName(type: DbType, t: EditTarget): string {
+export function tableName(type: DbType, t: EditTarget): string {
   const q = quoteIdent[type]
   if (type === 'mssql') return `${q(t.database)}.${q(t.schema ?? 'dbo')}.${q(t.table)}`
   if (type === 'postgres') return `${q(t.schema ?? 'public')}.${q(t.table)}` // PostgreSQL: baza je određena konekcijom

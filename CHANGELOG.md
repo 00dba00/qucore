@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.22.0 (2026-11-27)
+
+- Jobs: move the result of a saved query or a whole table into a table in another database (add, add or update by key, replace all, table created if missing) or into a CSV, JSON or Excel file, with a run log that shows the row where writing failed
+- Results: SQL Server dates and times are shown as stored instead of shifted by the time zone (also in exports and data editing)
+
 ## v0.21.1 (2026-11-26)
 
 - Builds: macOS and Linux installers build without the Windows-only SQL Server driver

@@ -4,12 +4,12 @@ import logo from './assets/logo.svg'
 import './completion'
 import { setFormatErrorHandler } from './formatting'
 import type { SourceTable } from './editing'
-import type { ConnectionInfo, DbObject, DbRef, Environment, ParamValue, Project, SavedQuery, TextFile } from '../../shared/types'
+import type { ConnectionInfo, DataJob, DbObject, DbRef, Environment, ParamValue, Project, SavedQuery, TextFile } from '../../shared/types'
 import { ConnectionDialog } from './components/ConnectionDialog'
 import { ContextMenuProvider, useContextMenu } from './components/ContextMenu'
 import { Explorer, type ExplorerActions } from './components/Explorer'
 import { HistoryPanel, clearHistory } from './components/HistoryPanel'
-import { Bookmark, HelpCircle, History, Plus, Server, Trash } from '@vectilume/react'
+import { Bookmark, HelpCircle, History, Plus, Server, SwapHorizontal, Trash } from '@vectilume/react'
 import { DatabaseProjectsDialog, ProjectPicker, ProjectsDialog, projectScope } from './components/Projects'
 import { SaveQueryDialog, SavedPanel, type SaveRequest } from './components/Saved'
 import { QuickSwitcher } from './components/QuickSwitcher'
@@ -24,6 +24,7 @@ import { DiagramTab } from './components/DiagramTab'
 import { TableTab } from './components/TableTab'
 import { selectTopSql } from './dialect'
 import { GuideTab } from './components/GuideTab'
+import { JobTab, JobsPanel } from './components/Jobs'
 // tr = t unutar tabs.map((t) => …), gdje je t tab.
 import { t, t as tr } from './i18n'
 
@@ -80,7 +81,10 @@ function Studio() {
   const [dialog, setDialog] = useState<{ initial?: ConnectionInfo } | null>(null)
   const [toasts, setToasts] = useState<Toast[]>([])
   const [sidebarW, setSidebarW] = useState(300)
-  const [panel, setPanel] = useState<'explorer' | 'saved' | 'history'>('explorer')
+  const [panel, setPanel] = useState<'explorer' | 'saved' | 'history' | 'jobs'>('explorer')
+  const [jobsVersion, setJobsVersion] = useState(0)
+  /** Poslovi koji upravo rade (za oznaku u popisu i gumb Prekini u tabu). */
+  const [runningJobs, setRunningJobs] = useState<Set<number>>(() => new Set())
   const [historyVersion, setHistoryVersion] = useState(0)
   const bumpHistory = useCallback(() => setHistoryVersion((n) => n + 1), [])
   const [projects, setProjects] = useState<Project[]>([])
@@ -405,6 +409,20 @@ function Studio() {
     }
   }, [openFiles, notify])
 
+  /** Tab posla prijenosa podataka; isti posao se ne otvara dvaput. job null = novi posao u projektu. */
+  const openJob = useCallback((job: DataJob | null, projectId?: number) => {
+    if (job) {
+      const existing = state.current.tabs.find((x) => x.kind === 'job' && x.jobId === job.id)
+      if (existing) return setActiveId(existing.id)
+    }
+    const id = `tab-${++tabCounter}`
+    setTabs((list) => [
+      ...list,
+      { id, kind: 'job', title: job?.name ?? t('jobs.newName'), jobId: job?.id, jobProjectId: job?.projectId ?? projectId, initialSql: '' }
+    ])
+    setActiveId(id)
+  }, [])
+
   /** Vodič: jedan tab, ponovno se aktivira. */
   const openGuide = useCallback(() => {
     const existing = state.current.tabs.find((t) => t.kind === 'guide')
@@ -576,6 +594,8 @@ function Studio() {
       if (key === 's') {
         e.preventDefault()
         if (document.querySelector('.modal-backdrop')) return
+        // Tab posla sprema sam (JobTab sluša Ctrl+S).
+        if (cur?.kind === 'job') return
         // Tab datoteke: Ctrl+S sprema u datoteku; Ctrl+Shift+S i dalje sprema kao novi query u projekt.
         if (!e.shiftKey && cur?.file) void saveFileTab(cur.id, false)
         else void saveActiveTab(e.shiftKey)
@@ -647,12 +667,15 @@ function Studio() {
           <button className={'sidebar-tab' + (panel === 'history' ? ' active' : '')} onClick={() => setPanel('history')} title={t('app.historyTitle')}>
             <History size={14} /> <span className="sidebar-tab-label">{t('app.history')}</span>
           </button>
+          <button className={'sidebar-tab' + (panel === 'jobs' ? ' active' : '')} onClick={() => setPanel('jobs')} title={t('jobs.panelTitle')}>
+            <SwapHorizontal size={14} /> <span className="sidebar-tab-label">{t('jobs.panel')}</span>
+          </button>
           <span className="sidebar-tabs-spacer" />
           {panel === 'explorer' ? (
             <button className="icon-btn" title={t('conn.new')} onClick={actions.newConnection}>
               <Plus size={16} />
             </button>
-          ) : panel === 'saved' ? null : (
+          ) : panel === 'saved' || panel === 'jobs' ? null : (
             <button
               className="icon-btn"
               title={t('app.clearHistory')}
@@ -698,6 +721,16 @@ function Studio() {
             if (!exists) notify(t('app.historyConnMissing', h.connectionName))
             newQuery(exists ? h.connectionId : undefined, exists ? h.database : undefined, h.sql, { title: t('app.fromHistory'), params: h.params })
           }}
+        />
+        <JobsPanel
+          projectId={activeProject ? activeProject.id : null}
+          version={jobsVersion}
+          visible={panel === 'jobs'}
+          running={runningJobs}
+          notify={notify}
+          onOpen={openJob}
+          onNew={() => activeProject && openJob(null, activeProject.id)}
+          onChanged={() => setJobsVersion((n) => n + 1)}
         />
       </aside>
       <div className="sidebar-resizer" onMouseDown={startResize} />
@@ -777,6 +810,29 @@ function Studio() {
           {tabs.map((t) =>
             t.kind === 'guide' ? (
               <GuideTab key={t.id} active={t.id === activeId} />
+            ) : t.kind === 'job' ? (
+              <JobTab
+                key={t.id}
+                tab={t}
+                active={t.id === activeId}
+                connections={connections}
+                projects={projects}
+                running={t.jobId !== undefined && runningJobs.has(t.jobId)}
+                notify={notify}
+                onSaved={(job) => {
+                  patchTab(t.id, { jobId: job.id, title: job.name })
+                  setJobsVersion((n) => n + 1)
+                }}
+                onRunState={(jobId, running) => {
+                  setRunningJobs((set) => {
+                    const next = new Set(set)
+                    if (running) next.add(jobId)
+                    else next.delete(jobId)
+                    return next
+                  })
+                  if (!running) setJobsVersion((n) => n + 1)
+                }}
+              />
             ) : t.kind === 'table' ? (
               t.lazy ? null : (
                 <TableTab

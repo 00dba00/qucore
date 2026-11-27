@@ -1,7 +1,8 @@
 name: Release
 
 # Na tag vX.Y.Z: installeri za Windows, macOS i Linux u nacrtu GitHub izdanja (objavljuje se ručno).
-# Bez potpisa dok se ne odluči o certifikatima (vidi README, "Installing unsigned builds").
+# Windows se potpisuje preko SignPath Foundation kad postoji secret SIGNPATH_API_TOKEN; bez njega build je nepotpisan.
+# macOS i Linux ostaju nepotpisani (vidi README, "Installing unsigned builds").
 on:
   push:
     tags: ['v*']
@@ -9,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   build:
@@ -35,6 +37,8 @@ jobs:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       # electron-builder ne objavljuje sam; izdanje radi korak ispod.
       EP_PUBLISH: never
+      # Prazno dok SignPath ne odobri projekt -> koraci potpisivanja se preskaču.
+      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -47,7 +51,73 @@ jobs:
         run: rm -rf node_modules/msnodesqlv8
       - run: npm run typecheck
       - run: npm run test:unit
-      - run: npm run ${{ matrix.script }} -- --publish never
+
+      # macOS i Linux: jedan korak, nepotpisano.
+      - if: runner.os != 'Windows'
+        run: npm run ${{ matrix.script }} -- --publish never
+
+      # Windows: aplikacija bez installera (dist/win-unpacked), da se QuCore.exe potpiše prije pakiranja.
+      # SignPath ne zna potpisati sadržaj NSIS installera, zato dva zahtjeva: prvo QuCore.exe, pa installer.
+      - if: runner.os == 'Windows'
+        run: npx electron-vite build && npx electron-builder --win --dir --publish never
+
+      - if: runner.os == 'Windows' && env.SIGNPATH_API_TOKEN != ''
+        id: upload-app-exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-app-exe
+          path: dist/win-unpacked/QuCore.exe
+          if-no-files-found: error
+      - if: runner.os == 'Windows' && env.SIGNPATH_API_TOKEN != ''
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'qucore' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: app-exe
+          github-artifact-id: ${{ steps.upload-app-exe.outputs.artifact-id }}
+          wait-for-completion: true
+          # Zahtjev može čekati ručno odobrenje u SignPathu.
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed/app
+      - if: runner.os == 'Windows' && env.SIGNPATH_API_TOKEN != ''
+        shell: pwsh
+        run: Copy-Item signed/app/QuCore.exe dist/win-unpacked/QuCore.exe -Force
+
+      # Installer iz (potpisane) aplikacije.
+      - if: runner.os == 'Windows'
+        run: npx electron-builder --win nsis --prepackaged dist/win-unpacked --publish never
+
+      - if: runner.os == 'Windows' && env.SIGNPATH_API_TOKEN != ''
+        id: upload-installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-installer
+          path: dist/*.exe
+          if-no-files-found: error
+      - if: runner.os == 'Windows' && env.SIGNPATH_API_TOKEN != ''
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'qucore' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: installer
+          github-artifact-id: ${{ steps.upload-installer.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed/installer
+      - if: runner.os == 'Windows' && env.SIGNPATH_API_TOKEN != ''
+        shell: pwsh
+        run: |
+          Copy-Item signed/installer/*.exe dist/ -Force
+          foreach ($f in @('dist/win-unpacked/QuCore.exe') + (Get-ChildItem dist/*.exe).FullName) {
+            $s = Get-AuthenticodeSignature $f
+            Write-Host "$f -> $($s.Status) $($s.SignerCertificate.Subject)"
+            if ($s.Status -ne 'Valid') { throw "Not signed: $f" }
+          }
+
       - uses: actions/upload-artifact@v4
         with:
           name: qucore-${{ matrix.os }}

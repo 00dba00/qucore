@@ -15,7 +15,7 @@ import type {
   TxState
 } from '../../shared/types.ts'
 import type { DriverFactory, MetadataDriver, QuerySession } from '../driver.ts'
-import { errorMessage, groupForeignKeys, groupTables, quoteIdent, splitGoBatches, type ResultCollector } from '../util.ts'
+import { errorMessage, groupForeignKeys, groupTables, mssqlDateText, quoteIdent, splitGoBatches, type ResultCollector } from '../util.ts'
 import { assertOneRow } from '../edits.ts'
 import { mssqlPlan } from '../plan.ts'
 import { groupForeignKeyRows, groupIndexes, type FkColumnRow, type IndexColumnRow } from '../tableDetails.ts'
@@ -523,11 +523,17 @@ class MssqlSession implements QuerySession {
     const errors: Error[] = []
     return new Promise((resolve) => {
       req.on('info', (m: { message: string }) => this.messages.push({ kind: 'info', text: cleanOdbc(new Error(m.message)).message }))
+      // Tipovi kolona trenutnog seta: datumi se pretvaraju u tekst prema tipu (date, time, datetime2…).
+      let types: (string | undefined)[] = []
       req.on('recordset', (columns: { name: string; type?: { declaration?: string } }[]) => {
         collector.endSet()
-        collector.startSet(columns.map((c) => ({ name: c.name, type: c.type?.declaration })))
+        types = columns.map((c) => c.type?.declaration)
+        collector.startSet(columns.map((c, i) => ({ name: c.name, type: types[i] })))
       })
-      req.on('row', (row: unknown[]) => collector.addRow(row))
+      req.on('row', (row: unknown[]) => {
+        for (let i = 0; i < row.length; i++) if (row[i] instanceof Date) row[i] = mssqlDateText(row[i] as Date, types[i])
+        collector.addRow(row)
+      })
       req.on('rowsaffected', (n: number) => this.messages.push({ kind: 'rows', text: `(${t('core.rowsAffected', n)})` }))
       // U stream načinu mssql nakon grešaka uvijek emitira 'done'.
       req.on('error', (err: Error) => errors.push(err))

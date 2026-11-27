@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
-import type { QueryProgress, StudioApi } from '../shared/types'
+import type { JobProgress, QueryProgress, StudioApi } from '../shared/types'
 
 async function call<T>(channel: string, ...args: unknown[]): Promise<T> {
   const r = (await ipcRenderer.invoke(channel, ...args)) as { ok: boolean; value?: T; error?: string }
@@ -85,6 +85,22 @@ const api: StudioApi = {
     list: (projectId) => call('snippets:list', projectId),
     save: (s) => call('snippets:save', s),
     remove: (id) => call('snippets:remove', id)
+  },
+  jobs: {
+    list: (projectId) => call('jobs:list', projectId),
+    get: (id) => call('jobs:get', id),
+    save: (j) => call('jobs:save', j),
+    remove: (id) => call('jobs:remove', id),
+    run: (id) => call('jobs:run', id),
+    cancel: (id) => call('jobs:cancel', id),
+    onProgress: (listener) => {
+      const h = (_e: IpcRendererEvent, p: JobProgress) => listener(p)
+      ipcRenderer.on('jobs:progress', h)
+      return () => void ipcRenderer.removeListener('jobs:progress', h)
+    },
+    runs: (id, limit) => call('jobs:runs', id, limit),
+    sourceColumns: (source) => call('jobs:sourceColumns', source),
+    chooseFolder: () => call('jobs:chooseFolder')
   },
   files: {
     open: () => call('files:open'),

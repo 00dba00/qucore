@@ -3,7 +3,7 @@ import { dirname } from 'node:path'
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 import { parseSavedSearch } from '../core/savedSearch.ts'
 import type { TableRef } from '../core/sqlRefs.ts'
-import type { AliasTarget, DbRef, Environment, ParamValue, ProjectAlias, RunAnomaly, QueryVersion, SavedRun, SchemaCheck, Snippet, SnippetInput, HistoryEntry, HistoryQuery, Project, ProjectInput, RunInfo, SavedQuery, SavedQueryFilter, SavedQueryInput } from '../shared/types'
+import type { AliasTarget, DataJob, DataJobConfig, DataJobInput, JobRun, JobRunStatus, DbRef, Environment, ParamValue, ProjectAlias, RunAnomaly, QueryVersion, SavedRun, SchemaCheck, Snippet, SnippetInput, HistoryEntry, HistoryQuery, Project, ProjectInput, RunInfo, SavedQuery, SavedQueryFilter, SavedQueryInput } from '../shared/types'
 import { t } from '../shared/i18n.ts'
 
 /**
@@ -135,7 +135,32 @@ const MIGRATIONS: string[] = [
      body TEXT NOT NULL,
      created_at TEXT NOT NULL,
      updated_at TEXT NOT NULL
-   );`
+   );`,
+  // v6: poslovi prijenosa podataka i njihova izvođenja (#data-jobs)
+  `CREATE TABLE data_job (
+     id INTEGER PRIMARY KEY,
+     project_id INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+     name TEXT NOT NULL,
+     config TEXT NOT NULL,
+     created_at TEXT NOT NULL,
+     updated_at TEXT NOT NULL,
+     UNIQUE (project_id, name)
+   );
+   CREATE TABLE data_job_run (
+     id INTEGER PRIMARY KEY,
+     job_id INTEGER NOT NULL REFERENCES data_job(id) ON DELETE CASCADE,
+     started_at TEXT NOT NULL,
+     finished_at TEXT,
+     status TEXT NOT NULL CHECK (status IN ('running', 'success', 'error', 'cancelled')),
+     trigger TEXT NOT NULL CHECK (trigger IN ('manual', 'schedule')),
+     rows_read INTEGER NOT NULL DEFAULT 0,
+     rows_written INTEGER NOT NULL DEFAULT 0,
+     target TEXT NOT NULL DEFAULT '',
+     error TEXT,
+     failed_row TEXT,
+     failed_row_number INTEGER
+   );
+   CREATE INDEX data_job_run_job ON data_job_run(job_id, id);`
 ]
 
 /** Objekt baze za provjeru sheme (tablice i viewovi iz Explorera). */
@@ -878,4 +903,134 @@ export class WorkspaceStore {
   ignoreFingerprint(fingerprint: string): void {
     this.run('INSERT OR REPLACE INTO fingerprint_ignored (fingerprint, ignored_at) VALUES (?, ?)', fingerprint, new Date().toISOString())
   }
+
+  // ---- Poslovi prijenosa podataka (#data-jobs) ----
+
+  private toJob(r: JobRow, lastRun?: JobRun): DataJob {
+    return {
+      id: r.id,
+      projectId: r.project_id,
+      name: r.name,
+      config: JSON.parse(r.config) as DataJobConfig,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+      lastRun
+    }
+  }
+
+  private toJobRun(r: JobRunRow): JobRun {
+    return {
+      id: r.id,
+      jobId: r.job_id,
+      startedAt: r.started_at,
+      finishedAt: r.finished_at ?? undefined,
+      status: r.status as JobRunStatus,
+      trigger: r.trigger as JobRun['trigger'],
+      rowsRead: r.rows_read,
+      rowsWritten: r.rows_written,
+      target: r.target,
+      error: r.error ?? undefined,
+      failedRow: r.failed_row ?? undefined,
+      failedRowNumber: r.failed_row_number ?? undefined
+    }
+  }
+
+  listJobs(projectId: number): DataJob[] {
+    const rows = this.all<JobRow>('SELECT * FROM data_job WHERE project_id = ? ORDER BY name COLLATE NOCASE', projectId)
+    const last = this.all<JobRunRow>(
+      `SELECT r.* FROM data_job_run r
+       WHERE r.id = (SELECT MAX(x.id) FROM data_job_run x WHERE x.job_id = r.job_id)
+         AND r.job_id IN (SELECT id FROM data_job WHERE project_id = ?)`,
+      projectId
+    )
+    return rows.map((r) => {
+      const run = last.find((x) => x.job_id === r.id)
+      return this.toJob(r, run && this.toJobRun(run))
+    })
+  }
+
+  getJob(id: number): DataJob | null {
+    const r = this.all<JobRow>('SELECT * FROM data_job WHERE id = ?', id)[0]
+    if (!r) return null
+    const run = this.all<JobRunRow>('SELECT * FROM data_job_run WHERE job_id = ? ORDER BY id DESC LIMIT 1', id)[0]
+    return this.toJob(r, run && this.toJobRun(run))
+  }
+
+  saveJob(j: DataJobInput): DataJob {
+    const name = j.name.trim()
+    if (!name) throw new Error(t('main.jobNameEmpty'))
+    const clash = this.all<{ id: number }>('SELECT id FROM data_job WHERE project_id = ? AND name = ? COLLATE NOCASE', j.projectId, name)[0]
+    if (clash && clash.id !== j.id) throw new Error(t('main.jobNameTaken', name))
+    const now = new Date().toISOString()
+    const config = JSON.stringify(j.config)
+    let id = j.id
+    if (id) {
+      const r = this.run('UPDATE data_job SET project_id = ?, name = ?, config = ?, updated_at = ? WHERE id = ?', j.projectId, name, config, now, id)
+      if (r.changes === 0) throw new Error(t('main.jobMissing'))
+    } else {
+      id = Number(this.run('INSERT INTO data_job (project_id, name, config, created_at, updated_at) VALUES (?, ?, ?, ?, ?)', j.projectId, name, config, now, now).lastInsertRowid)
+    }
+    return this.getJob(id)!
+  }
+
+  removeJob(id: number): void {
+    this.run('DELETE FROM data_job WHERE id = ?', id)
+  }
+
+  startJobRun(jobId: number, trigger: JobRun['trigger'], target: string): number {
+    return Number(
+      this.run(
+        "INSERT INTO data_job_run (job_id, started_at, status, trigger, target) VALUES (?, ?, 'running', ?, ?)",
+        jobId, new Date().toISOString(), trigger, target
+      ).lastInsertRowid
+    )
+  }
+
+  finishJobRun(
+    runId: number,
+    r: { status: Exclude<JobRunStatus, 'running'>; rowsRead: number; rowsWritten: number; target?: string; error?: string; failedRow?: string; failedRowNumber?: number }
+  ): JobRun {
+    this.run(
+      `UPDATE data_job_run SET finished_at = ?, status = ?, rows_read = ?, rows_written = ?, target = COALESCE(?, target),
+         error = ?, failed_row = ?, failed_row_number = ? WHERE id = ?`,
+      new Date().toISOString(), r.status, r.rowsRead, r.rowsWritten, r.target || null, r.error ?? null, r.failedRow ?? null, r.failedRowNumber ?? null, runId
+    )
+    const row = this.all<JobRunRow>('SELECT * FROM data_job_run WHERE id = ?', runId)[0]
+    // Posao obrisan dok je radio: zapis je otišao s njim, vraća se samo ishod.
+    if (!row) return { id: runId, jobId: 0, startedAt: '', finishedAt: new Date().toISOString(), trigger: 'manual', target: r.target ?? '', ...r }
+    return this.toJobRun(row)
+  }
+
+  /** Izvođenja koja su ostala 'running' (aplikacija se srušila ili zatvorila usred posla). */
+  closeStaleJobRuns(): void {
+    this.run("UPDATE data_job_run SET status = 'error', finished_at = started_at, error = ? WHERE status = 'running'", t('main.jobInterrupted'))
+  }
+
+  jobRuns(jobId: number, limit = 50): JobRun[] {
+    return this.all<JobRunRow>('SELECT * FROM data_job_run WHERE job_id = ? ORDER BY id DESC LIMIT ?', jobId, limit).map((r) => this.toJobRun(r))
+  }
+}
+
+interface JobRow {
+  id: number
+  project_id: number
+  name: string
+  config: string
+  created_at: string
+  updated_at: string
+}
+
+interface JobRunRow {
+  id: number
+  job_id: number
+  started_at: string
+  finished_at: string | null
+  status: string
+  trigger: string
+  rows_read: number
+  rows_written: number
+  target: string
+  error: string | null
+  failed_row: string | null
+  failed_row_number: number | null
 }

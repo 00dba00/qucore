@@ -2,7 +2,7 @@
   "name": "qucore",
   "productName": "QuCore",
   "desktopName": "qucore.desktop",
-  "version": "0.21.1",
+  "version": "0.22.0",
   "description": "Lightweight SQL editor for SQL Server, PostgreSQL and MariaDB",
   "main": "./out/main/index.js",
   "license": "MIT",
@@ -21,7 +21,8 @@
     "db:up": "docker compose -f docker/compose.yml up -d --wait",
     "db:down": "docker compose -f docker/compose.yml down",
     "db:seed": "node --experimental-strip-types --no-warnings scripts/seed-test-db.ts",
-    "test:db": "npm run db:seed && npm run test:core",
+    "test:jobs": "node --experimental-strip-types --no-warnings scripts/test-jobs.ts",
+    "test:db": "npm run db:seed && npm run test:core && npm run test:jobs",
     "site:build": "node --experimental-strip-types --no-warnings scripts/build-site.ts",
     "site:preview": "node --experimental-strip-types --no-warnings scripts/build-site.ts --serve",
     "db:demo": "node --experimental-strip-types --no-warnings scripts/seed-demo-db.ts"

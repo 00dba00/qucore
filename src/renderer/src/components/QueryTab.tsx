@@ -54,7 +54,10 @@ import { num, rich, t } from '../i18n'
 export interface TabData {
   id: string
   /** Vrsta taba; bez vrijednosti je SQL upit. */
-  kind?: 'query' | 'diagram' | 'guide' | 'table'
+  kind?: 'query' | 'diagram' | 'guide' | 'table' | 'job'
+  /** Tab posla prijenosa podataka: spremljeni posao (bez id-a = novi) i njegov projekt. */
+  jobId?: number
+  jobProjectId?: number
   title: string
   connectionId?: string
   database?: string

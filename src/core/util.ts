@@ -7,6 +7,21 @@ function pad(n: number, len = 2): string {
   return String(n).padStart(len, '0')
 }
 
+/**
+ * Datum sa SQL Servera kao tekst kakav je u bazi. tedious (useUTC) vraća Date čije su UTC komponente
+ * vrijednost iz baze; lokalno formatiranje bi je pomaknulo za vremensku zonu. Tip stupca određuje oblik.
+ */
+export function mssqlDateText(v: Date, columnType?: string): string {
+  if (Number.isNaN(v.getTime())) return String(v)
+  const date = `${v.getUTCFullYear()}-${pad(v.getUTCMonth() + 1)}-${pad(v.getUTCDate())}`
+  const time = `${pad(v.getUTCHours())}:${pad(v.getUTCMinutes())}:${pad(v.getUTCSeconds())}.${pad(v.getUTCMilliseconds(), 3)}`
+  const type = (columnType ?? '').toLowerCase().replace(/\(.*$/, '').trim()
+  if (type === 'date') return date
+  if (type === 'time') return time
+  if (type === 'datetimeoffset') return `${date} ${time}+00:00`
+  return `${date} ${time}`
+}
+
 /** Pretvara vrijednost iz drivera u nešto što se sigurno serijalizira (IPC i JSON). */
 export function normalizeValue(v: unknown): CellValue {
   if (v === null || v === undefined) return null

@@ -80,6 +80,9 @@ Pushing a `vX.Y.Z` tag builds all three platforms in GitHub Actions (`.github/wo
 - **Environments and aliases**: an alias (e.g. `core-db`) points to a database per environment; a query on an alias opens in
   the project's default environment, and each tab can switch.
 - **Variables**: `:customer_id` or `${date_from}` open a form before running; values are escaped per dialect and remembered per project.
+- **Data jobs**: move the result of a saved query (with its variables and environment) or a whole table into a table in
+  another database (add, add or update by key, replace all; the table can be created) or into a CSV, JSON or Excel file.
+  Rows stream in batches, a failed row is pinpointed, and every run is logged.
 - **History**: every run with a fingerprint (literals as `?`), so the same query with other values counts as the same;
   after 5 runs in 7 days QuCore suggests saving it.
 - **Safety**: confirmation before writes on production, an extra tick for `UPDATE` / `DELETE` without `WHERE` and `TRUNCATE`,
@@ -120,8 +123,9 @@ so a missing translation fails `npm run typecheck`. Adding a language means a ne
 npm run typecheck
 npm run test:unit   # no databases: SQL parsing, fingerprints, search syntax, plans, exports, workspace store, translations
 npm run db:up       # PostgreSQL 17, MariaDB 11.4 and SQL Server 2022 in Docker (ports 15432 / 13306 / 11433)
-npm run test:db     # recreate the "shop" test database, then test:core on all three
+npm run test:db     # recreate the "shop" test database, then test:core and test:jobs on all three
 npm run test:core   # tests only; other servers through PG_* / MARIA_* / MSSQL_* env variables, TEST_DBS=pg,maria picks some
+npm run test:jobs   # data jobs: every source → destination pair, add or update, replace, failed row, cancel, files
 npm run test:e2e
 ```
 

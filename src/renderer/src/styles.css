@@ -603,3 +603,43 @@ textarea:focus { border-color: var(--accent); }
 .tag.pk { color: var(--warn); border-color: rgba(224, 178, 79, 0.5); }
 .table-ddl { flex: 1; min-height: 300px; display: flex; flex-direction: column; }
 .table-ddl-bar { display: flex; gap: 12px; padding: 0 0 6px; }
+
+/* ---------- poslovi prijenosa podataka (#data-jobs) ---------- */
+.jobs-head { padding: 6px 10px; border-bottom: 1px solid var(--bg-3); }
+.job-status { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; vertical-align: 1px; background: var(--bg-3); border: 1px solid var(--border); flex: none; }
+.job-status.success { background: var(--ok); border-color: var(--ok); }
+.job-status.error { background: var(--err); border-color: var(--err); }
+.job-status.cancelled { background: var(--warn); border-color: var(--warn); }
+.job-status.running { background: var(--accent); border-color: var(--accent); animation: job-pulse 1s ease-in-out infinite alternate; }
+@keyframes job-pulse { from { opacity: 1; } to { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .job-status.running { animation: none; } }
+.job-tab { flex: 1; min-height: 0; min-width: 0; flex-direction: column; }
+.job-toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--bg-2); border-bottom: 1px solid var(--border); }
+.job-toolbar .job-name { font-size: 14px; font-weight: 600; width: 280px; }
+.job-progress { padding: 5px 12px; background: var(--sel); font-size: 12.5px; display: flex; align-items: center; gap: 8px; }
+.job-body { flex: 1; overflow-y: auto; padding: 12px 18px 24px; }
+.job-body section { max-width: 920px; }
+.job-body section + section { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--bg-3); }
+.job-body h3 { margin: 0 0 8px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.job-grid { grid-template-columns: 130px minmax(0, 1fr); }
+.job-grid select, .job-grid > input { max-width: 420px; }
+.job-grid .row input:not([type='checkbox']):not([type='radio']) { min-width: 0; }
+.job-columns { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.job-columns > .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.job-columns .inline-check { display: inline-flex; align-items: center; gap: 6px; }
+.job-mapping { border-collapse: collapse; }
+.job-mapping th { text-align: left; font-weight: normal; color: var(--muted); font-size: 12px; padding: 0 8px 4px 0; }
+.job-mapping td { padding: 2px 8px 2px 0; }
+.job-mapping .row { display: flex; gap: 6px; }
+.job-runs-head { display: flex; align-items: center; gap: 6px; }
+.job-runs-head h3 { margin: 0; }
+.job-runs { border-collapse: collapse; width: 100%; margin-top: 6px; font-size: 12.5px; }
+.job-runs th { text-align: left; font-weight: normal; color: var(--muted); padding: 3px 10px 3px 0; border-bottom: 1px solid var(--bg-3); }
+.job-runs td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--bg-3); white-space: nowrap; }
+.job-runs .num { text-align: right; font-variant-numeric: tabular-nums; }
+.job-runs tr.clickable { cursor: pointer; }
+.job-runs tr.clickable:hover { background: var(--bg-hover); }
+.job-run-target { max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
+.job-run-error { color: var(--err); }
+.job-run-detail td { white-space: normal; }
+.job-run-detail .status-box { margin: 2px 0 6px; max-height: 260px; }

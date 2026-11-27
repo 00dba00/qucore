@@ -16,6 +16,8 @@ import { mariaPlan, mssqlPlan, pgPlan, selfCost, selfTime } from '../src/core/pl
 import { genDelete, genInsert, genSelect, genUpdate, paramName } from '../src/core/generateSql.ts'
 import { groupForeignKeyRows, groupIndexes, parsePgFkDef, parsePgIndexDef } from '../src/core/tableDetails.ts'
 import { WorkspaceStore } from '../src/main/workspaceStore.ts'
+import { adaptValue, createTableSql, insertSql, kindOf, mapRow, maxRowsPerStatement, resolveColumns, transferValue, upsertSql, type TransferValue } from '../src/core/jobs/sql.ts'
+import { expandFileName, uniqueFileName } from '../src/core/jobs/files.ts'
 import { setLang, t } from '../src/shared/i18n.ts'
 import { en } from '../src/shared/locales/en.ts'
 import { hr } from '../src/shared/locales/hr.ts'
@@ -729,5 +731,122 @@ try {
 } finally {
   rmSync(dir, { recursive: true, force: true })
 }
+
+console.log('poslovi prijenosa (#data-jobs)')
+await check('insert i upsert po dijalektu', () => {
+  const target = { database: 'shop', table: 'kupci' }
+  const rows: TransferValue[][] = [[1, "O'Brien", null, true, new Uint8Array([0xde, 0xad])]]
+  const cols = ['id', 'name', 'note', 'flag', 'data']
+  assert.equal(
+    insertSql('mssql', target, cols, rows),
+    "INSERT INTO [shop].[dbo].[kupci] ([id], [name], [note], [flag], [data]) VALUES\n(1, N'O''Brien', NULL, 1, 0xdead)"
+  )
+  assert.equal(
+    insertSql('postgres', target, cols, rows),
+    `INSERT INTO "public"."kupci" ("id", "name", "note", "flag", "data") VALUES\n(1, 'O''Brien', NULL, TRUE, '\\xdead'::bytea)`
+  )
+  assert.equal(insertSql('mariadb', target, ['a'], [['x\\y'], [2]]), "INSERT INTO `shop`.`kupci` (`a`) VALUES\n('x\\\\y'),\n(2)")
+  assert.match(upsertSql('postgres', target, ['id', 'name'], ['id'], [[1, 'a']]), /ON CONFLICT \("id"\) DO UPDATE SET "name" = EXCLUDED\."name"$/)
+  assert.match(upsertSql('postgres', target, ['id'], ['ID'], [[1]]), /ON CONFLICT \("ID"\) DO NOTHING$/)
+  assert.match(upsertSql('mariadb', target, ['id', 'name'], ['id'], [[1, 'a']]), /ON DUPLICATE KEY UPDATE `name` = VALUES\(`name`\)$/)
+  const merge = upsertSql('mssql', target, ['id', 'name'], ['id'], [[1, 'a'], [2, 'b']])
+  assert.match(merge, /^MERGE INTO \[shop\]\.\[dbo\]\.\[kupci\] WITH \(HOLDLOCK\) AS t/)
+  assert.match(merge, /ON t\.\[id\] = s\.\[id\]\nWHEN MATCHED THEN UPDATE SET t\.\[name\] = s\.\[name\]\nWHEN NOT MATCHED THEN INSERT/)
+  assert.ok(merge.endsWith(';'))
+  assert.throws(() => upsertSql('mssql', target, ['id'], [], [[1]]), /barem jedan ključni/)
+  assert.throws(() => upsertSql('mssql', target, ['id'], ['kod'], [[1]]), /kod/)
+  assert.equal(maxRowsPerStatement('mssql', 5000), 1000)
+  assert.equal(maxRowsPerStatement('postgres', 500), 500)
+})
+await check('vrijednosti: datumi SQL Servera, binarni, veliki brojevi', () => {
+  const d = new Date(Date.UTC(2025, 0, 2, 3, 4, 5, 6))
+  assert.equal(transferValue(d, 'mssql', 'datetime2'), '2025-01-02 03:04:05.006')
+  assert.equal(transferValue(d, 'mssql', 'date'), '2025-01-02')
+  assert.equal(transferValue(d, 'mssql', 'time'), '03:04:05.006')
+  assert.equal(transferValue(d, 'mssql', 'datetimeoffset'), '2025-01-02 03:04:05.006+00:00')
+  assert.equal(transferValue(12345678901234567890n, 'postgres'), '12345678901234567890')
+  assert.equal(transferValue(Number.NaN, 'postgres'), 'NaN')
+  assert.equal(transferValue([1, 2], 'postgres'), '[1,2]')
+  const buf = Buffer.from([1, 2])
+  assert.equal(transferValue(buf, 'mariadb'), buf)
+  assert.equal(adaptValue('2025-01-02 03:04:05.123456', 'mssql', 'datetime'), '2025-01-02 03:04:05.123')
+  assert.equal(adaptValue('2025-01-02 03:04:05.123456', 'mssql', 'datetime2'), '2025-01-02 03:04:05.123456')
+  assert.equal(adaptValue('2025-01-02 03:04:05.123456', 'postgres', 'datetime'), '2025-01-02 03:04:05.123456')
+})
+await check('nova tablica: tipovi po izvoru i vrijednostima', () => {
+  assert.equal(kindOf('decimal(18,2)', []), 'decimal')
+  assert.equal(kindOf('double precision', []), 'float')
+  assert.equal(kindOf('blob', [null, 'tekst']), 'text')
+  assert.equal(kindOf('blob', [new Uint8Array([1])]), 'binary')
+  assert.equal(kindOf(undefined, [3_000_000_000]), 'bigint')
+  assert.equal(kindOf(undefined, [1.5]), 'float')
+  assert.equal(kindOf(undefined, []), 'text')
+  const cols = [{ name: 'id', kind: 'text' as const }, { name: 'iznos', kind: 'decimal' as const }]
+  assert.equal(
+    createTableSql('mssql', { database: 'shop', table: 'x' }, cols, ['id']),
+    'CREATE TABLE [shop].[dbo].[x] (\n  [id] nvarchar(450) NOT NULL,\n  [iznos] decimal(38,10) NULL,\n  PRIMARY KEY ([id])\n)'
+  )
+  assert.equal(createTableSql('postgres', { database: 'shop', schema: 'crm', table: 'x' }, cols), 'CREATE TABLE "crm"."x" (\n  "id" text NULL,\n  "iznos" numeric NULL\n)')
+  assert.match(createTableSql('mariadb', { database: 'shop', table: 'x' }, cols, ['id']), /`id` varchar\(255\) NOT NULL[\s\S]*DEFAULT CHARSET=utf8mb4$/)
+})
+await check('mapiranje stupaca', () => {
+  const src = [{ name: 'id', type: 'int' }, { name: 'Naziv' }]
+  assert.deepEqual(resolveColumns(src, []).map((c) => [c.name, c.from]), [['id', 0], ['Naziv', 1]])
+  const m = resolveColumns(src, [{ target: 'kod', source: 'ID' }, { target: 'izvor', constant: 'crm' }])
+  assert.deepEqual(m, [{ name: 'kod', from: 0, sourceType: 'int' }, { name: 'izvor', constant: 'crm' }])
+  assert.deepEqual(mapRow([7, 'x'], m, 'postgres'), [7, 'crm'])
+  assert.throws(() => resolveColumns(src, [{ target: 'a', source: 'nema' }]), /nema stupac "nema"/)
+  assert.throws(() => resolveColumns(src, [{ target: 'a', source: 'id' }, { target: 'A', source: 'Naziv' }]), /dvaput/)
+  assert.throws(() => resolveColumns([{ name: 'x' }, { name: 'X' }], []), /dvaput/)
+  assert.throws(() => resolveColumns(src, [{ target: ' ', source: 'id' }]), /nema naziv/)
+})
+await check('naziv datoteke posla', () => {
+  const now = new Date(2026, 10, 27, 9, 5, 7)
+  assert.equal(expandFileName('{job}-{date}_{time}', 'Kupci: dnevno', now, 'csv'), 'Kupci_ dnevno-2026-11-27_090507.csv')
+  assert.equal(expandFileName('izvoz.JSON', 'x', now, 'json'), 'izvoz.JSON')
+  assert.equal(expandFileName('izvoz.csv', 'x', now, 'xlsx'), 'izvoz.csv.xlsx')
+  assert.throws(() => expandFileName('../izvan', 'x', now, 'csv'), /nije ispravan naziv/)
+  assert.throws(() => expandFileName('a\\b', 'x', now, 'csv'), /nije ispravan naziv/)
+  assert.throws(() => expandFileName('  ', 'x', now, 'csv'), /nije ispravan naziv/)
+  const taken = new Set([join('d', 'a.csv'), join('d', 'a (2).csv')])
+  assert.equal(uniqueFileName('d', 'a.csv', (p) => taken.has(p)), 'a (3).csv')
+  assert.equal(uniqueFileName('d', 'b.csv', (p) => taken.has(p)), 'b.csv')
+})
+await check('poslovi u bazi projekata: spremanje, nazivi, log izvođenja', () => {
+  const jdir = mkdtempSync(join(tmpdir(), 'qucore-jobs-unit-'))
+  const w = new WorkspaceStore(join(jdir, 'w.db'))
+  try {
+    const p = w.saveProject({ name: 'CRM' })
+    const config = {
+      source: { kind: 'query' as const, savedQueryId: 1 },
+      columns: [],
+      destination: { kind: 'file' as const, format: 'csv' as const, folder: 'C:\\x', fileName: '{job}', ifExists: 'overwrite' as const },
+      batchSize: 500
+    }
+    const j = w.saveJob({ projectId: p.id, name: ' Dnevni izvoz ', config })
+    assert.equal(j.name, 'Dnevni izvoz')
+    assert.deepEqual(j.config, config)
+    assert.throws(() => w.saveJob({ projectId: p.id, name: 'dnevni IZVOZ', config }), /već ima posao/)
+    assert.throws(() => w.saveJob({ projectId: p.id, name: '  ', config }), /naziv/)
+    const renamed = w.saveJob({ id: j.id, projectId: p.id, name: 'Dnevni izvoz 2', config })
+    assert.equal(renamed.id, j.id)
+    const run1 = w.startJobRun(j.id, 'manual', 'C:\\x\\{job}')
+    w.finishJobRun(run1, { status: 'success', rowsRead: 10, rowsWritten: 10, target: 'C:\\x\\a.csv' })
+    const run2 = w.startJobRun(j.id, 'manual', 'C:\\x\\{job}')
+    const r2 = w.finishJobRun(run2, { status: 'error', rowsRead: 5, rowsWritten: 0, error: 'pad', failedRow: '{"id":1}', failedRowNumber: 3 })
+    assert.equal(r2.target, 'C:\\x\\{job}')
+    assert.equal(r2.failedRowNumber, 3)
+    assert.deepEqual(w.jobRuns(j.id).map((r) => r.status), ['error', 'success'])
+    assert.equal(w.listJobs(p.id)[0].lastRun?.status, 'error')
+    w.startJobRun(j.id, 'manual', 'x')
+    w.closeStaleJobRuns()
+    assert.equal(w.jobRuns(j.id)[0].status, 'error')
+    w.removeProject(p.id)
+    assert.equal(w.getJob(j.id), null)
+  } finally {
+    w.close()
+    rmSync(jdir, { recursive: true, force: true })
+  }
+})
 
 console.log(`\n${passed} prošlo${process.exitCode ? ', ima grešaka' : ''}`)

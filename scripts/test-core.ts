@@ -318,6 +318,16 @@ for (const cfg of configs) {
       assert.ok(r.messages.some((m) => m.text.includes('cleanup 5')), JSON.stringify(r.messages))
     })
   }
+  if (cfg.type === 'mssql') {
+    await check('datumi kakvi su u bazi (bez pomaka za vremensku zonu)', async () => {
+      const r = await mgr.execute(
+        s.sessionId,
+        "SELECT CAST('2025-07-02 03:04:05.123' AS datetime2(3)) AS d2, CAST('2025-01-02 03:04:05' AS datetime) AS d1, CAST('2025-01-02' AS date) AS dd, CAST('13:14:15.5' AS time(3)) AS tt, CAST('2025-01-02 03:04:05 +02:00' AS datetimeoffset(0)) AS dto"
+      )
+      assert.equal(r.error, undefined, r.error)
+      assert.deepEqual(r.resultSets[0].rows[0], ['2025-07-02 03:04:05.123', '2025-01-02 03:04:05.000', '2025-01-02', '13:14:15.500', '2025-01-02 01:04:05.000+00:00'])
+    })
+  }
   if (cfg.type === 'mariadb') {
     await check('DELIMITER skripta + CALL', async () => {
       const r = await mgr.execute(s.sessionId, 'DROP PROCEDURE IF EXISTS p2;\nDELIMITER $$\nCREATE PROCEDURE p2() BEGIN SELECT 1 AS a; SELECT 2 AS b; END$$\nDELIMITER ;\nCALL p2();')

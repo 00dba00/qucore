@@ -61,6 +61,9 @@ npm run build:linux  # Linux AppImage i .tar.gz (na Linuxu)
   prije izvršavanja otvaraju formu. Vrijednost ide u SQL kao literal s escapeom po dijalektu; tip *auto* (broj ili tekst),
   *tekst*, *broj*, *NULL* ili *SQL izraz*. Zadnje vrijednosti pamte se po projektu; povijest sprema predložak i vrijednosti,
   pa izvršavanje otvoreno iz povijesti nudi iste vrijednosti.
+- **Poslovi prijenosa podataka**: rezultat spremljenog upita (s varijablama i okruženjem) ili cijela tablica upisuje se
+  u tablicu druge baze (dodaj, dodaj ili ažuriraj po ključu, zamijeni sve; tablica se može kreirati) ili u CSV, JSON ili
+  Excel datoteku. Retci idu u paketima, redak koji padne se pronađe, a svako izvođenje se bilježi.
 - **Zaštita**: tab na *prod* konekciji ima crveni okvir i oznaku PROD; INSERT/UPDATE/DELETE/MERGE/DDL/EXEC na produ traži
   potvrdu. `UPDATE`/`DELETE` bez `WHERE` i `TRUNCATE` (na bilo kojem okruženju) traže još i kvačicu *Razumijem da mijenja
   sve retke*. Spremljeni query pokrenut na drugoj bazi nego što je spremljen pita prije izvršavanja. Nakon izvršavanja tab
@@ -135,7 +138,8 @@ mali HTTP server (npr. Fastify) koji poziva isti `ConnectionManager`, a u `src/r
 ```bash
 npm run test:unit   # bez baza: fingerprint, tablice iz SQL-a, sintaksa pretrage, projekti, spremljeni queryji, povijest
 npm run db:up       # PostgreSQL, MariaDB i SQL Server u Dockeru (docker/compose.yml, portovi 15432/13306/11433)
-npm run test:db     # ponovno napravi bazu shop (docker/seed) pa test:core na sve tri
+npm run test:db     # ponovno napravi bazu shop (docker/seed) pa test:core i test:jobs na sve tri
+npm run test:jobs   # poslovi prijenosa: svaki par izvor → odredište, upsert, zamjena, redak koji pada, prekid, datoteke
 npm run test:core   # samo testovi; druge baze preko PG_*/MARIA_*/MSSQL_* env varijabli, TEST_DBS=pg,maria bira neke
 npm run test:e2e
 npm run db:demo     # demo baza "demo" (izmišljena web trgovina) za snimke vodiča, vidi scripts/guide-shots.mjs

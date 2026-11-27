@@ -27,10 +27,11 @@ It applies to version **0.19**. The same guide is built into the app: press **F1
 18. [Quick switcher (Ctrl+P)](#18-quick-switcher-ctrlp)
 19. [Safety: production, queries without WHERE, wrong database](#19-safety-production-queries-without-where-wrong-database)
 20. [Warnings after running](#20-warnings-after-running)
-21. [Settings](#21-settings)
-22. [Shortcuts](#22-shortcuts)
-23. [Where your data is](#23-where-your-data-is)
-24. [FAQ](#24-faq)
+21. [Data jobs](#21-data-jobs)
+22. [Settings](#22-settings)
+23. [Shortcuts](#23-shortcuts)
+24. [Where your data is](#24-where-your-data-is)
+25. [FAQ](#25-faq)
 
 ---
 
@@ -200,8 +201,8 @@ Good to know:
 - The same file never opens twice: Ctrl+O on an open file just activates it.
 - In a file tab **Ctrl+S saves to the file**, not to saved queries. To add it to a project, use **Ctrl+Shift+S** (save as a new query).
 - Files larger than 20 MB are not opened (the editor is not suited for them).
-- With [restored tabs](#21-settings) on, a file tab comes back after a restart too, with its unsaved changes and the ● mark.
-- QuCore reads and saves only files you chose yourself (see [Where your data is](#23-where-your-data-is)).
+- With [restored tabs](#22-settings) on, a file tab comes back after a restart too, with its unsaved changes and the ● mark.
+- QuCore reads and saves only files you chose yourself (see [Where your data is](#24-where-your-data-is)).
 
 ### Running
 
@@ -263,7 +264,7 @@ More to know:
 - **Commit is not possible while a result waits for the remaining rows** (*Max rows*): first *Load more* to the end or close it. On PostgreSQL closing such a result cancels the query, which breaks the whole transaction (you get the red badge).
 - **Saving changes from the grid** (chapter 7) uses a separate connection, so it is blocked while a transaction is open: Commit or Rollback first, then save.
 - The Auto-commit tick is remembered per tab (also after a restart); an open transaction is not: closing the app always ends it.
-- How new tabs start (with or without Auto-commit, separately for production) is set in [Settings](#21-settings).
+- How new tabs start (with or without Auto-commit, separately for production) is set in [Settings](#22-settings).
 
 ### Execution plan (why a query is slow)
 
@@ -645,7 +646,7 @@ A snippet is a saved piece of SQL (e.g. `WHERE created_at >= CURRENT_DATE - INTE
 
 ## 19. Safety: production, queries without WHERE, wrong database
 
-All three checks are on by default; you can turn each one off in [Settings](#21-settings), which also explains the risk.
+All three checks are on by default; you can turn each one off in [Settings](#22-settings), which also explains the risk.
 
 ### Production
 
@@ -680,7 +681,59 @@ QuCore compares a run with earlier runs of **the same query on the same database
 
 ---
 
-## 21. Settings
+## 21. Data jobs
+
+A job moves the result of a saved query, or a whole table, **into a table in another database** or **into a file** (CSV, JSON, Excel). You set it up once and run it whenever you need to. A job belongs to a project.
+
+### New job
+
+1. Choose a project at the top and open the **Jobs** tab in the sidebar (the icon with two arrows).
+2. Click **New job** and enter a name.
+3. **Source**: a *Saved query* from the project or a *Whole table*. If the query has variables (chapter 16), enter their values. If it is bound to an alias (chapter 15), choose the environment.
+4. **Columns**: by default all source columns are written under the same names. Turn this off to pick columns, rename them or add a fixed value (for example a source label). *Load source columns* runs the query only until the result header arrives.
+5. **Destination**: a database table or a file (see below).
+6. **Save** (Ctrl+S), then **Run**.
+
+![A job exporting to CSV](img/35-job.jpg)
+
+Before the first run QuCore shows where the data comes from and where it goes. If the destination is a connection marked *prod*, it asks on every run, with a red warning.
+
+### Writing to a table
+
+- Choose the connection, database, (schema) and table. An existing table must have every column being written. *Create the table if it does not exist* creates a new table with types taken from the source.
+- **Rows**:
+  - *Add*: rows are added to the table.
+  - *Add or update*: a row with the same values in the **key columns** is updated, the others are added. The table needs a primary or unique key on those columns (a new table gets one automatically).
+  - *Replace all*: all rows of the table are deleted first.
+- **Transaction**:
+  - *All or nothing*: an error undoes everything and the table stays as it was.
+  - *Commit after each batch*: batches already written stay even if a later one fails.
+- Transfers also work between different databases (for example SQL Server → PostgreSQL). Dates, decimals, accented text and binary data are moved without loss.
+
+![Writing to a table in another database](img/36-job-database.jpg)
+
+### Writing to a file
+
+- **Format**: CSV (semicolon, comma or tab delimiter), JSON or Excel (at most 1,048,575 rows).
+- The **folder** is chosen with *Choose folder*. A job may write only to folders you chose yourself.
+- The **file name** may contain `{date}` (2026-11-27), `{time}` (143005) and `{job}` (the job name), for example `{job}-{date}`.
+- **If it exists**: *Overwrite* or *New file with a number* (`export (2).csv`).
+- The file is written under a temporary name and gets its real name only when the job succeeds, so a failed job never leaves a half-written file.
+
+### Runs
+
+Below the form is the list of runs: start, duration, rows read and written, and where they were written. The colored dot shows the outcome (green: succeeded, red: failed, yellow: cancelled). The same dot is shown next to the job in the Jobs tab.
+
+- **Click a failed run** to see the message and, when it could be found, **the row where writing failed** (its number and values).
+- **Cancel** stops the job. With *All or nothing* nothing stays written.
+- Only the first result of the query is transferred. If the query returns more results (for example a procedure), the others are skipped.
+- A job runs while QuCore is open, and closing the app stops it. Running on a schedule, also when QuCore is closed, is planned for the next version.
+
+> Large tables are read in batches (500 rows by default). While a batch is being written, reading the source waits, so memory does not grow even with millions of rows.
+
+---
+
+## 22. Settings
 
 Some of QuCore's behaviors are a trade-off between safety and speed, e.g. the confirmation before writing on production or Auto-commit. **You decide** how you want them. The defaults match how QuCore behaved before settings existed, so nothing changes until you change it. One default carries a risk itself and therefore shows a warning right away: Auto-commit on production is on.
 
@@ -709,7 +762,7 @@ Good to know:
 
 - Auto-commit and Max rows apply to **tabs you open after the change**; open tabs keep theirs (you can also change them in the toolbar).
 - The other settings apply right away, in every tab.
-- Settings are stored in the app profile (see [Where your data is](#23-where-your-data-is)).
+- Settings are stored in the app profile (see [Where your data is](#24-where-your-data-is)).
 
 ### Interface language
 
@@ -730,7 +783,7 @@ Good to know:
 
 ---
 
-## 22. Shortcuts
+## 23. Shortcuts
 
 | Shortcut | Action |
 |---|---|
@@ -763,7 +816,7 @@ Good to know:
 
 ---
 
-## 23. Where your data is
+## 24. Where your data is
 
 Everything is in the `%APPDATA%\QuCore` folder. If you used a version older than 0.17, the app renames the old `%APPDATA%\SQL Studio` folder to `QuCore` on first start; connections, passwords and history are kept.
 
@@ -781,7 +834,7 @@ Why `file-grants.json`: QuCore reads and saves only files you chose yourself (th
 
 ---
 
-## 24. FAQ
+## 25. FAQ
 
 **The query does not run, a window opens instead.** That is the variables form (chapter 16) or a safety confirmation (chapter 19).
 

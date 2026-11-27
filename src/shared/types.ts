@@ -479,6 +479,107 @@ export interface SavedQueryFilter {
   search?: string
 }
 
+// ---------- Poslovi prijenosa podataka (#data-jobs) ----------
+
+/** insert = dodaj retke, upsert = dodaj ili ažuriraj po ključu, replace = obriši sve retke pa dodaj. */
+export type JobWriteMode = 'insert' | 'upsert' | 'replace'
+export type JobFileFormat = 'csv' | 'json' | 'xlsx'
+
+/** Spremljeni query projekta (s varijablama i okruženjem aliasa) ili cijela tablica. */
+export type JobSource =
+  | { kind: 'query'; savedQueryId: number; env?: Environment; params?: Record<string, ParamValue> }
+  | { kind: 'table'; connectionId: string; database: string; schema?: string; table: string }
+
+export interface JobDatabaseTarget {
+  kind: 'database'
+  connectionId: string
+  database: string
+  schema?: string
+  table: string
+  mode: JobWriteMode
+  /** Stupci po kojima upsert prepoznaje postojeći redak. */
+  keyColumns: string[]
+  /** Kreiraj tablicu ako ne postoji (tipovi prema izvoru). */
+  createTable: boolean
+  /** all = jedna transakcija (greška ne ostavlja ništa), batch = commit nakon svakog paketa. */
+  transaction: 'all' | 'batch'
+}
+
+export interface JobFileTarget {
+  kind: 'file'
+  format: JobFileFormat
+  /** Mapa koju je korisnik odabrao u dijalogu. */
+  folder: string
+  /** Naziv datoteke; {date}, {time} i {job} se zamjenjuju pri izvođenju. */
+  fileName: string
+  ifExists: 'overwrite' | 'new'
+  /** CSV: razdjelnik (zadano ';'). */
+  delimiter?: ';' | ',' | '\t'
+}
+
+export type JobDestination = JobDatabaseTarget | JobFileTarget
+
+/** Stupac odredišta: iz stupca izvora ili konstanta. */
+export interface JobColumn {
+  target: string
+  /** Naziv stupca izvora; bez vrijednosti = konstanta. */
+  source?: string
+  constant?: string
+}
+
+export interface DataJobConfig {
+  source: JobSource
+  /** Prazno = svi stupci izvora pod istim nazivima. */
+  columns: JobColumn[]
+  destination: JobDestination
+  /** Redaka po paketu (upis u bazu i dojave napretka). */
+  batchSize: number
+}
+
+export type JobRunStatus = 'running' | 'success' | 'error' | 'cancelled'
+
+export interface JobRun {
+  id: number
+  jobId: number
+  /** ISO 8601. */
+  startedAt: string
+  finishedAt?: string
+  status: JobRunStatus
+  trigger: 'manual' | 'schedule'
+  rowsRead: number
+  rowsWritten: number
+  /** Kamo je upisano (konekcija/baza/tablica ili putanja datoteke). */
+  target: string
+  error?: string
+  /** Redak na kojem je upis pao (JSON objekt stupaca odredišta) i njegov redni broj. */
+  failedRow?: string
+  failedRowNumber?: number
+}
+
+export interface DataJob {
+  id: number
+  projectId: number
+  name: string
+  config: DataJobConfig
+  createdAt: string
+  updatedAt: string
+  lastRun?: JobRun
+}
+
+export interface DataJobInput {
+  /** Bez id-a = novi posao. */
+  id?: number
+  projectId: number
+  name: string
+  config: DataJobConfig
+}
+
+export interface JobProgress {
+  jobId: number
+  rowsRead: number
+  rowsWritten: number
+}
+
 /** API koji UI vidi (preload ga izlaže kao window.api). Web verzija će ga implementirati preko fetch-a. */
 export interface StudioApi {
   app: {
@@ -569,6 +670,21 @@ export interface StudioApi {
     list(projectId: number | null): Promise<Snippet[]>
     save(s: SnippetInput): Promise<Snippet>
     remove(id: number): Promise<void>
+  }
+  jobs: {
+    list(projectId: number): Promise<DataJob[]>
+    get(id: number): Promise<DataJob | null>
+    save(job: DataJobInput): Promise<DataJob>
+    remove(id: number): Promise<void>
+    /** Pokreće posao i čeka kraj; napredak stiže kroz onProgress. Vraća zapis izvođenja (i kad padne). */
+    run(id: number): Promise<JobRun>
+    cancel(id: number): Promise<void>
+    onProgress(listener: (p: JobProgress) => void): () => void
+    runs(id: number, limit?: number): Promise<JobRun[]>
+    /** Stupci izvora (izvodi upit samo do zaglavlja rezultata). */
+    sourceColumns(source: JobSource): Promise<ResultColumn[]>
+    /** Dijalog za mapu odredišne datoteke; null ako je odustao. */
+    chooseFolder(): Promise<string | null>
   }
   files: {
     /** Dijalog Otvori (više datoteka); prazno ako je odustao. */

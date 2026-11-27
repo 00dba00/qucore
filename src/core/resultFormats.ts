@@ -10,10 +10,10 @@ const NUMERIC_TYPE = /int|numeric|decimal|float|double|real|money|serial|number/
 const BINARY_TYPE = /binary|blob|bytea|image/i
 const PLAIN_NUMBER = /^-?\d+(\.\d+)?([eE][-+]?\d+)?$/
 
-function csvValue(v: CellValue): string {
+export function csvValue(v: CellValue): string {
   if (v === null) return ''
   const s = String(v)
-  return /[;,\n\r"]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s
+  return /[;,\t\n\r"]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s
 }
 
 /** CSV sa ";" i BOM-om, kako ga Excel s hrvatskim postavkama otvara ispravno. */
